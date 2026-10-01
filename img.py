@@ -14,7 +14,7 @@ while cpt < maxFrames:
         continue
     frame=cv2.resize(frame,(1080,600))
     cv2.imshow("test window", frame) # show image in window
-    cv2.imwrite(r"/Users/shaaz/Downloads/parking_lot/img_%d.jpg" %cpt, frame)
+    cv2.imwrite("img_%d.jpg" % cpt, frame)
     time.sleep(0.01)
     cpt += 1
     if cv2.waitKey(5)&0xFF==27:
