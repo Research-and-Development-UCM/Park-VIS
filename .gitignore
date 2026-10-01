@@ -2,3 +2,6 @@ videos/
 __pycache__/
 .venv/
 *.pt
+
+.DS_Store
+EOF
