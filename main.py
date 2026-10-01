@@ -11,7 +11,7 @@ cap = cv2.VideoCapture("IMG_3761.mp4")
 # Initialize parking management object
 parking_manager =  ParkingManagement(
     model="yolo11s.pt",# path to model file
-    classes=[2],
+    classes=[2, 3, 7],
     json_file="bounding_boxes.json",  # path to parking annotations file
 )
 

@@ -1,6 +1,7 @@
 videos/
 __pycache__/
 .venv/
+context_files/
 *.pt
 
 .DS_Store
