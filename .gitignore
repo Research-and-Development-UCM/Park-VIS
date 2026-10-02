@@ -2,7 +2,11 @@ videos/
 __pycache__/
 .venv/
 context_files/
+*.avi
+*.mp4
 *.pt
+*.jpg
+*.md
 
 .DS_Store
 EOF

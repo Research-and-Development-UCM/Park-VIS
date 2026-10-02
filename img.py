@@ -4,7 +4,7 @@ cpt = 0
 maxFrames = 1 # if you want 5 frames only.
 
 count=0
-cap=cv2.VideoCapture('IMG_3761.mp4')
+cap=cv2.VideoCapture('videos/IMG_3762.mp4')
 while cpt < maxFrames:
     ret, frame = cap.read()
     if not ret:
