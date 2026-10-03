@@ -9,15 +9,7 @@ passlib==1.7.4
 bcrypt==3.2.2
 cryptography>=42.0.0
 paho-mqtt>=2.0
-# NOTE: we deliberately do NOT install the Python onnxruntime package
-# here. The vulturevision C++ engine bundles its own libonnxruntime.so
-# (and the CUDA / DirectML provider plugins) and does all inference
-# in C++. The Python onnxruntime package used to be required only for
-# `ort.get_available_providers()` in backend/inference.py to drive the
-# Settings UI's "Inference Device" dropdown — that call has been
-# replaced with vulturevision._vulturevision.get_available_gpu_provider()
-# (a C++ probe), so the Python package is no longer needed. Skipping
-# it saves ~300 MB on the Docker image.
+ping
 pillow==10.4.0
 numpy==2.3.5
 python-multipart==0.0.22
