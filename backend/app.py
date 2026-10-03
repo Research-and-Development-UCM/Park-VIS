@@ -2058,6 +2058,25 @@ def submit_feedback(data: schemas.FeedbackSubmit, db: Session = Depends(get_db),
 
 
 
+# Register feature APIs before the frontend catch-all route.
+from .alerts import routes as alerts_routes
+from .parking_layout import router as parking_layout_router
+app.include_router(alerts_routes.router)
+app.include_router(parking_layout_router)
+
+# ---- Frontend static files --------------------------------------------------
+# In PyInstaller frozen bundles, sys._MEIPASS points to the bundle root;
+# use that to resolve frontend/dist.  Fall back to CWD-relative for dev.
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    FRONTEND_DIST = os.path.join(sys._MEIPASS, "frontend", "dist")
+else:
+    FRONTEND_DIST = os.path.join("frontend", "dist")
+
+if os.path.isdir(FRONTEND_DIST):
+    assets_dir = os.path.join(FRONTEND_DIST, "assets")
+    if os.path.isdir(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
 @app.get("/{full_path:path}")
 async def catch_all(full_path: str):
     # 1. Ignore API calls (should have been caught by specific routes above)
