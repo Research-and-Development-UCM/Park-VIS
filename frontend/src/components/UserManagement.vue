@@ -21,7 +21,7 @@
             Full System Access
           </div>
           <div v-else>
-            <v-chip v-for="p in item.permissions.filter(p => p !== 'manage_billing')" :key="p" size="x-small" class="mr-1" color="secondary" variant="tonal">
+            <v-chip v-for="p in item.permissions" :key="p" size="x-small" class="mr-1" color="secondary" variant="tonal">
               {{ formatPermission(p) }}
             </v-chip>
           </div>

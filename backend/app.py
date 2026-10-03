@@ -31,7 +31,6 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from . import models, schemas, auth, inference, scheduler, crud, database
-from .billing import routes as billing_routes
 from .stream_manager import stream_manager
 import signal
 import datetime
@@ -696,13 +695,6 @@ def get_version():
         "repo_url": "",
     }
 
-@app.get("/api/settings/license-mode")
-def get_license_mode(user: models.User = Depends(require_auth)):
-    from .billing.session import default_session
-    from .billing.enforcer import compute_mode
-    session = default_session()
-    return {"mode": compute_mode(session)}
-
 @app.get("/api/settings/gpu-provider")
 async def get_gpu_provider():
     # The probe calls into the C++ engine which creates an
@@ -720,7 +712,7 @@ async def get_gpu_provider():
 
 @app.get("/api/settings/{key}")
 async def get_setting(key: str, db: Session = Depends(get_db), user: models.User = Depends(require_auth)):
-    # Settings can hold secrets (SMTP password, billing tokens) / host
+    # Settings can hold secrets (SMTP password) / host
     # paths, so an unauthenticated caller must NOT be able to read them.
     setting = crud.get_setting(db, key)
     if not setting:
@@ -1989,16 +1981,7 @@ def submit_feedback(data: schemas.FeedbackSubmit, db: Session = Depends(get_db),
     img_filename = f"{base_name}.jpg"
     json_filename = f"{base_name}.json"
 
-    # Write to the same data directory the background uploader
-    # reads from (``$LV_HOME/training_feedback/...``).  The submit
-    # endpoint previously used a relative path
-    # ``training_feedback/...`` which landed in the backend's
-    # current working directory — that worked for ``python main.py``
-    # but the uploader was looking in ``config.DATA_DIR`` (typically
-    # ``/var/lib/park-vis``) and never saw the files.  Using
-    # ``config.DATA_DIR`` here matches the uploader's expectation
-    # and the operator's intuition that the data lives under
-    # ``/var/lib/park-vis/feedback``.
+    # Keep corrections and their source images in local application storage.
     images_dir = os.path.join(config.DATA_DIR, "training_feedback", "images")
     annotations_dir = os.path.join(config.DATA_DIR, "training_feedback", "annotations")
     os.makedirs(images_dir, exist_ok=True)
@@ -2046,11 +2029,6 @@ def submit_feedback(data: schemas.FeedbackSubmit, db: Session = Depends(get_db),
                 "kind": "false_positive" if was_occupied else "false_negative",
             })
 
-    # Include the HWID + user email so the background upload task
-    # knows which cloud account to attribute the file to (the cloud
-    # re-validates the HWID against its device registry before
-    # minting presigned URLs).
-    from .billing.hwid import get_hwid as _get_hwid
     metadata = {
         "file_name": img_filename,
         "app_version": config.APP_VERSION,
@@ -2070,75 +2048,15 @@ def submit_feedback(data: schemas.FeedbackSubmit, db: Session = Depends(get_db),
         "corrections": corrections,
         "submitted_by": user.username,
         "submitted_at": datetime.datetime.now(datetime.UTC).isoformat(),
-        "hwid": _get_hwid(),
-        # The cloud billing portal knows which email owns this HWID
-        # (matched via the Device table), so we don't need to send the
-        # email ourselves — but the on-prem has no email column on
-        # its User model, only ``username``. The cloud re-resolves
-        # the email at upload time via its own user registry.
-        "username": user.username,
-        # Attempt counter — bumped by the background uploader on each
-        # failed cloud/S3 interaction. Used to move persistently-failing
-        # files out of the active queue into ``training_feedback/failed/``
-        # after the cap is hit, so they don't keep blocking the rest.
-        "upload_attempts": 0,
-        "last_attempt_at": None,
     }
 
     with open(os.path.join(annotations_dir, json_filename), "w") as f:
         json.dump(metadata, f, indent=2)
 
     logger.info("Feedback received for camera {cid} (Scan {sid})", cid=data.camera_id, sid=data.scan_id)
-    return {"message": "Feedback submitted successfully! Thank you for helping improve the AI."}
+    return {"message": "Feedback saved locally successfully."}
 
 
-@app.get("/api/admin/feedback/pending")
-def get_pending_feedback_count(user: models.User = Depends(require_auth)):
-    """Number of feedback submissions waiting to be uploaded to S3.
-
-    Surfaced to the frontend so the operator gets a warning when the
-    queue is backing up (i.e. the cloud is unreachable or presign is
-    rate-limiting us).
-    """
-    if not auth.check_permission_direct(user, "manage_cameras"):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    # Match the submit endpoint and the uploader: read from
-    # ``$LV_HOME/training_feedback/annotations``.  The previous
-    # relative path read from the CWD, which on a service-style
-    # install (systemd, Docker) is the wrong directory and the
-    # queue counter always reported 0.
-    annotations_dir = os.path.join(config.DATA_DIR, "training_feedback", "annotations")
-    threshold = int(os.getenv("PARK_VIS_FEEDBACK_QUEUE_WARN", "100"))
-    if not os.path.isdir(annotations_dir):
-        return {"pending": 0, "threshold": threshold}
-    try:
-        count = sum(1 for f in os.listdir(annotations_dir) if f.endswith(".json"))
-    except OSError as exc:
-        logger.warning("Failed to count pending feedback: {e}", e=exc)
-        count = 0
-    return {"pending": count, "threshold": threshold}
-
-# Billing integration routes
-app.include_router(billing_routes.router)
-
-# Alerting subsystem routes (channels, rules, history, retry)
-from .alerts import routes as alerts_routes
-app.include_router(alerts_routes.router)
-from .parking_layout import router as parking_layout_router
-app.include_router(parking_layout_router)
-
-# ---- Frontend static files --------------------------------------------------
-# In PyInstaller frozen bundles, sys._MEIPASS points to the bundle root;
-# use that to resolve frontend/dist.  Fall back to CWD-relative for dev.
-if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-    FRONTEND_DIST = os.path.join(sys._MEIPASS, "frontend", "dist")
-else:
-    FRONTEND_DIST = os.path.join("frontend", "dist")
-
-if os.path.isdir(FRONTEND_DIST):
-    assets_dir = os.path.join(FRONTEND_DIST, "assets")
-    if os.path.isdir(assets_dir):
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
 @app.get("/{full_path:path}")
 async def catch_all(full_path: str):

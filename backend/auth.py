@@ -12,7 +12,7 @@ SECRET = config.SECRET_KEY
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 24 hours
 
-ADMIN_PERMISSIONS = ["manage_cameras", "view_history", "view_metrics", "edit_settings", "manage_users", "manage_api_keys", "view_diagnostics", "manage_billing", "manage_alerts"]
+ADMIN_PERMISSIONS = ["manage_cameras", "view_history", "view_metrics", "edit_settings", "manage_users", "manage_api_keys", "view_diagnostics", "manage_alerts"]
 
 
 def parse_permissions(user: models.User) -> list:

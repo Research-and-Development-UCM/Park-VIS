@@ -979,7 +979,7 @@ onUnmounted(() => {
 /* Info variant — used for the pool-exceeded banner after the
    cloud-side refactor that auto-bumps/decrements the pool.  The
    system handles the adjustment automatically now, so this is a
-   notification rather than a billing problem the user must fix. */
+   notification rather than a problem the user must fix. */
 .community-banner--info {
   border-left-color: rgb(var(--v-theme-info));
   background: linear-gradient(

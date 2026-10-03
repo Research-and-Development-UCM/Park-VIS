@@ -62,34 +62,9 @@
         style="max-width: 200px;"
         @update:model-value="fetchSpaceEvents"
       ></v-select>
-      <!-- Pending upload warning chip: only in commercial mode when warning triggered -->
-      <v-tooltip
-        v-if="feedbackQueueWarning && isCommercial"
-        location="bottom"
-        :open-delay="300"
-      >
-        <template v-slot:activator="{ props: tipProps }">
-          <v-chip
-            v-bind="tipProps"
-            color="warning"
-            variant="flat"
-            size="small"
-            class="ml-3"
-            prepend-icon="mdi-alert-octagon-outline"
-          >
-            {{ feedbackPending }} pending
-          </v-chip>
-        </template>
-        <span>
-          {{ feedbackPending }} feedback submissions are queued locally
-          and not yet uploaded to the Park VIS training bucket.
-          They will upload automatically once the upload service is reachable,
-          but check connectivity or AWS credentials if this number keeps growing.
-        </span>
-      </v-tooltip>
 
       <v-btn
-        v-if="hasPermission('manage_cameras') && bgImage && isCommercial"
+        v-if="hasPermission('manage_cameras') && bgImage"
         :color="isFeedbackMode ? 'error' : 'secondary'"
         variant="tonal"
         class="ml-3"
@@ -340,16 +315,16 @@
       <v-card>
         <v-card-title class="text-h6 bg-error text-white">
           <v-icon start icon="mdi-send" class="mr-2"></v-icon>
-          Submit feedback
+          Save feedback
         </v-card-title>
         <v-card-text class="pa-6">
-          <p class="text-body-1">Submit the selected camera image and occupancy corrections to the configured training service?</p>
+          <p class="text-body-1">Save the selected camera image and occupancy corrections locally for model training?</p>
         </v-card-text>
         <v-divider></v-divider>
         <v-card-actions class="pa-4">
           <v-spacer></v-spacer>
           <v-btn variant="text" @click="showFeedbackDialog = false">Cancel</v-btn>
-          <v-btn color="error" variant="flat" @click="confirmSubmit">Submit feedback</v-btn>
+          <v-btn color="error" variant="flat" @click="confirmSubmit">Save feedback</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -364,15 +339,9 @@
 import { ref, onMounted, computed, reactive, watch, nextTick, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import axios from 'axios';
-import { feedbackApi } from '../api/feedback';
-import { billingStatus } from '../api/billingStatus';
 import { parseTimestamp } from '../utils/format';
 
 
-const isCommercial = computed(() => {
-  const mode = billingStatus.state.status?.mode;
-  return mode === 'commercial' || mode === 'trial_commercial';
-});
 
 
 const route = useRoute();
@@ -405,30 +374,6 @@ const isFeedbackMode = ref(false);
 const feedbackSubmitting = ref(false);
 const showFeedbackDialog = ref(false);
 const snackbar = ref({ show: false, text: '', color: 'success' });
-
-// Pending feedback uploads to the S3 training bucket. Surfaced as
-// a warning chip near the "Improve AI" button when the queue grows
-// past the backend's configured threshold — usually means the
-// billing portal is unreachable or AWS credentials are broken.
-const feedbackPending = ref(0);
-const feedbackQueueThreshold = ref(100);
-let feedbackPollTimer = null;
-const FEEDBACK_POLL_MS = 60000;  // matches the backend upload tick
-
-async function refreshFeedbackPending() {
-  try {
-    const data = await feedbackApi.pending();
-    feedbackPending.value = data.pending;
-    feedbackQueueThreshold.value = data.threshold;
-  } catch (e) {
-    // Silently ignore — the chip just won't appear. The backend
-    // log will show the auth error if it's something persistent.
-  }
-}
-
-const feedbackQueueWarning = computed(
-  () => feedbackPending.value > feedbackQueueThreshold.value
-);
 
 const cameras = ref([]);
 const spaces = ref([]);
@@ -878,7 +823,6 @@ const confirmSubmit = async () => {
     isFeedbackMode.value = false;
     // Refresh the pending counter so the warning chip (if any) reflects
     // the new file immediately rather than waiting for the next poll.
-    refreshFeedbackPending();
   } catch (e) {
     console.error("Feedback failed:", e);
     snackbar.value = { show: true, text: 'Failed to submit feedback: ' + (e.response?.data?.detail || e.message), color: 'error' };
@@ -1027,21 +971,11 @@ onMounted(async () => {
     selectedDate.value = ts.split('T')[0];
   }
 
-  if (!billingStatus.state.status && !billingStatus.state.loading) {
-    billingStatus.refresh();
-  }
 
   fetchCameras();
   if (isTodaySelected.value) startNowTimer();
   
   window.addEventListener('keydown', handleGlobalKeyDown);
-
-  // Poll the feedback upload queue — surfaces a warning chip when
-  // uploads are stuck (e.g. cloud unreachable, S3 misconfigured).
-  if (hasPermission('manage_cameras')) {
-    refreshFeedbackPending();
-    feedbackPollTimer = setInterval(refreshFeedbackPending, FEEDBACK_POLL_MS);
-  }
 
   resizeObserver = new ResizeObserver(() => {
     if (resizeTimeout) clearTimeout(resizeTimeout);
@@ -1054,7 +988,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (nowInterval) clearInterval(nowInterval);
-  if (feedbackPollTimer) clearInterval(feedbackPollTimer);
   if (resizeTimeout) clearTimeout(resizeTimeout);
   if (resizeObserver) resizeObserver.disconnect();
   window.removeEventListener('keydown', handleGlobalKeyDown);

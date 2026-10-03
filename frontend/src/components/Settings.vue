@@ -124,20 +124,6 @@
                 No GPU detected on this host. The model will run on CPU.
               </div>
             </template>
-            <template v-if="device === 'cuda' && licenseMode === 'community'">
-              <v-alert
-                type="warning"
-                density="compact"
-                variant="tonal"
-                class="mt-2"
-                color="warning"
-              >
-                <div class="font-weight-bold mb-1">CPU processing active</div>
-                <div class="text-caption">
-                  This installation currently uses CPU inference. Selecting GPU does not enable acceleration on this runtime.
-                </div>
-              </v-alert>
-            </template>
           </div>
           <v-select
             v-model="device"
@@ -577,7 +563,6 @@ const gpuProvider = ref('');
 // this in a warning so the user can see *why* GPU is missing
 // instead of silently falling back to CPU.
 const gpuError = ref('');
-const licenseMode = ref('community');
 
 const alertingEnabled = ref(false);
 const smtpHost = ref('');
@@ -669,12 +654,6 @@ const fetchSettings = async () => {
       console.error('[SETTINGS] Error checking GPU provider:', e);
     }
 
-    try {
-      const resMode = await axios.get('/api/settings/license-mode');
-      licenseMode.value = resMode.data.mode;
-    } catch (e) {
-      console.error('[SETTINGS] Error checking license mode:', e);
-    }
 
     // Fetch settings individually to be more resilient to 404s
     interval.value = parseInt(await fetchSetting('inference_interval', '60'));

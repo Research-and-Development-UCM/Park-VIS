@@ -31,8 +31,6 @@ const routes = [
   { path: '/settings', component: Settings },
   { path: '/users', component: UserManagement },
   { path: '/access', component: APISection },
-  { path: '/billing', redirect: '/dashboard' },
-  { path: '/billing/callback', redirect: '/dashboard' },
   { path: '/diagnostics', component: DiagnosticsMenu, meta: { requiresAdmin: true } },
   { path: '/diagnostics/storage', component: StorageDiagnostics, meta: { requiresAdmin: true } },
   { path: '/diagnostics/heap', component: HeapDiagnostics, meta: { requiresAdmin: true } },
@@ -69,7 +67,7 @@ router.beforeEach((to, from, next) => {
   // Admin override allows all routes
   if (isAdmin) return next();
 
-  // Granular permission check (used by /billing, /billing/callback, etc.)
+  // Check route permissions.
   if (to.meta.requiresPermission && !permissions.includes(to.meta.requiresPermission)) {
     console.warn("[AUTH] Missing permission for route:", to.path)
     return next('/dashboard')

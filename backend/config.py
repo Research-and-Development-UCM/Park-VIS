@@ -309,8 +309,5 @@ class Config:
     SNAPSHOT_MAX_SIZE_GB = int(os.getenv("PARK_VIS_SNAPSHOT_MAX_SIZE_GB", "1000000"))
     CROP_MAX_SIZE_GB = int(os.getenv("PARK_VIS_CROP_MAX_SIZE_GB", "1000000"))
 
-    # --- Billing Integration ---
-    BILLING_PORTAL_URL = os.getenv("PARK_VIS_BILLING_PORTAL_URL", "https://license.lotvulture.com")
-    HEARTBEAT_INTERVAL_SECONDS = int(os.getenv("PARK_VIS_HEARTBEAT_INTERVAL_SECONDS", "600"))
 
 config = Config()

@@ -27,194 +27,65 @@ except ImportError:
         @staticmethod
         def get_available_gpu_provider():
             return {"provider": "", "error": "vulturevision engine not installed"}
-from .billing.enforcer import resolve_license
 from .logging_config import vulture_logger as logger
 
-# VultureVision manages its own internal engine pool and GPU serialized access
 _vv_instance = None
-_vv_config = {"license": None, "instance_id": None, "use_gpu": None, "max_res": None, "last_check": 0}
-# Protects cheapreads/writes of _vv_instance and _vv_config. Hold for
-# microseconds at a time, NEVER across the multi-second C++ engine build.
+_vv_config = {"use_gpu": None, "max_res": None, "last_check": 0, "generation": 0}
 _vv_init_lock = threading.Lock()
-# Serializes the slow VultureVision() construction so two worker threads
-# never build the same engine twice. This is distinct from _vv_init_lock
-# specifically so async callers (billing heartbeat, PUT /api/settings)
-# can still mutate _vv_config["last_check"] via invalidate_config_cache()
-# without their event loop blocking on a C++ build.
 _vv_build_lock = threading.Lock()
 _vv_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="inference_worker")
 
 
 def invalidate_config_cache():
-    """Force the next ``get_vulturevision()`` call to re-read settings.
-
-    Called from async event-loop contexts: the billing heartbeat
-    coroutine (scheduler._send_one_heartbeat) and the PUT
-    /api/settings/{key} route when the operator changes
-    ``inference_device`` or ``max_inference_resolution``.
-
-    Acquires ``_vv_init_lock`` to write ``last_check = 0`` safely.
-    Since ``_vv_init_lock`` is only held for microseconds in
-    ``get_vulturevision`` (and never across the slow C++ build),
-    this is safe and does not block the event loop.
-    """
-    global _vv_config
+    """Re-read inference settings without blocking the event loop."""
     with _vv_init_lock:
+        _vv_config["generation"] += 1
         _vv_config["last_check"] = 0
 
 
 def get_inference_executor():
     return _vv_executor
 
-def get_vulturevision(license_key=None, instance_id=None):
-    global _vv_instance, _vv_config
 
-    # Cheap path: if we already have an instance and the cache is fresh,
-    # return immediately. _vv_init_lock is only held long enough to read
-    # two fields — it is never held across the slow C++ build below.
+def get_vulturevision():
+    global _vv_instance
     with _vv_init_lock:
-        if _vv_instance is not None and (time.time() - _vv_config["last_check"]) <= 60:
+        if _vv_instance is not None and time.time() - _vv_config["last_check"] <= 60:
             return _vv_instance
-
-    # Slow path. Serialize builds across worker threads (so we don't
-    # construct two VultureVision instances at once) WITHOUT holding
-    # _vv_init_lock across the multi-second C++ construction — that
-    # would block invalidate_config_cache()'s atomic write from the
-    # event loop and freeze the whole app in CPU mode.
     with _vv_build_lock:
-        # Another worker may have just finished building while we were
-        # waiting on _vv_build_lock; re-check the cache before doing
-        # any work.
         with _vv_init_lock:
-            if _vv_instance is not None and (time.time() - _vv_config["last_check"]) <= 60:
+            if _vv_instance is not None and time.time() - _vv_config["last_check"] <= 60:
                 return _vv_instance
-
-        if license_key is None or instance_id is None:
-            license_key, instance_id = resolve_license_from_default_session()
-
+            generation = _vv_config["generation"]
         db = database.SessionLocal()
         try:
-            device_setting = db.query(models.Setting).filter_by(key="inference_device").first()
-            # Default to CPU when the setting row is missing. A missing
-            # row can happen on restores from pre-`inference_device`
-            # backups or after manual SQL edits. CPU is the safe default:
-            # the C++ engine always falls back to CPU if the CUDA/DML
-            # provider fails to load, but starting in "use_gpu=True"
-            # mode produces noisy "GPU provider load failed" log lines
-            # every 60 seconds on hosts without a GPU. The operator can
-            # still opt in to GPU via the Settings page once a row with
-            # value="cuda" is written by init_db.py or the UI.
-            use_gpu = (device_setting.value == "cuda") if device_setting else False
-
-            from .billing.session import default_session
-            from .billing.enforcer import compute_mode, COMMUNITY
-            sess = default_session()
-            mode = compute_mode(sess)
-
-            if use_gpu and mode == COMMUNITY:
-                logger.warning("GPU processing is a commercial-only feature. Downgrading to CPU mode for community license.")
-                use_gpu = False
-
-            max_res_setting = db.query(models.Setting).filter_by(key="max_inference_resolution").first()
-            max_res = int(max_res_setting.value) if max_res_setting else 1440
+            device = db.query(models.Setting).filter_by(key="inference_device").first()
+            resolution = db.query(models.Setting).filter_by(key="max_inference_resolution").first()
+            use_gpu = bool(device and device.value == "cuda")
+            max_res = int(resolution.value) if resolution else 1440
         finally:
             db.close()
-
-        # Snapshot the cached fields under the init lock so the rebuild
-        # decision is consistent. This is fast and never blocks the
-        # event loop meaningfully.
         with _vv_init_lock:
-            rebuild_needed = (_vv_instance is None or
-                              _vv_config["license"] != license_key or
-                              _vv_config["instance_id"] != instance_id or
-                              _vv_config["use_gpu"] != use_gpu or
-                              _vv_config["max_res"] != max_res)
-
-        if not rebuild_needed:
-            # Settings are unchanged — just refresh the poll timestamp
-            # so we don't re-enter the slow path for another 60s.
-            # BUT don't clobber last_check=0 if invalidate_config_cache()
-            # wrote it during the time spent waiting on _vv_build_lock,
-            # otherwise a license downgrade would be silently dropped.
-            with _vv_init_lock:
-                if _vv_config["last_check"] != 0:
-                    _vv_config["last_check"] = time.time()
-            return _vv_instance
-
-        # ---- Slow C++ build runs WITHOUT _vv_init_lock held ----
-        start_init = time.perf_counter()
-        logger.info("Initializing VultureVision (GPU: {gpu}, MaxRes: {res}, Mode: {mode})...",
-                    gpu=use_gpu, res=max_res,
-                    mode="commercial" if license_key else "community")
-        try:
-            repository_model = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "parking-occupancy.encs")
-            model_path = repository_model if not license_key and os.path.isfile(repository_model) else None
-            if model_path and os.path.getsize(model_path) < 1024:
+            rebuild = (_vv_instance is None or _vv_config["use_gpu"] != use_gpu
+                       or _vv_config["max_res"] != max_res)
+        if rebuild:
+            model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "parking-occupancy.encs")
+            if not os.path.isfile(model_path):
+                raise RuntimeError("AI model missing. Run git lfs pull to download models/parking-occupancy.encs.")
+            if os.path.getsize(model_path) < 1024:
                 with open(model_path, "rb") as model_file:
                     if model_file.read(80).startswith(b"version https://git-lfs.github.com/spec/v1"):
                         raise RuntimeError("The AI model is a Git LFS pointer. Run git lfs pull first.")
-            new_instance = VultureVision(
-                model_path=model_path,
-                license_key=license_key,
-                instance_id=instance_id,
-                use_gpu=use_gpu,
-                max_resolution=max_res
-            )
-        except Exception as e:
-            logger.error("VultureVision initialization/update failed: {e}", e=e)
-            # Re-raise only if we have no usable instance at all. If
-            # we already have a stale engine, keep serving it and leave
-            # last_check untouched so the next call retries the build.
+            logger.info("Loading parking model (GPU: {gpu}, MaxRes: {res})", gpu=use_gpu, res=max_res)
+            new_instance = VultureVision(model_path=model_path, use_gpu=use_gpu, max_resolution=max_res)
             with _vv_init_lock:
-                if _vv_instance is None:
-                    raise
-            return _vv_instance
-
-        init_elapsed = time.perf_counter() - start_init
-        logger.info("VultureVision library loaded successfully in {ms:.0f}ms", ms=init_elapsed * 1000)
-
-        # Publish the new instance under the init lock. If
-        # invalidate_config_cache() wrote last_check=0 during the slow
-        # build above (e.g. a license downgrade arrived mid-build),
-        # preserve the 0 so the NEXT call re-reads settings and rebuilds
-        # again — instead of clobbering it back to time.time() and
-        # dropping the invalidation.
+                _vv_instance = new_instance
+                _vv_config.update(use_gpu=use_gpu, max_res=max_res)
         with _vv_init_lock:
-            _vv_instance = new_instance
-            _vv_config.update({
-                "license": license_key,
-                "instance_id": instance_id,
-                "use_gpu": use_gpu,
-                "max_res": max_res
-            })
-            if _vv_config["last_check"] != 0:
+            if generation == _vv_config["generation"]:
                 _vv_config["last_check"] = time.time()
+        return _vv_instance
 
-    return _vv_instance
-
-
-def resolve_license_from_default_session():
-    """Resolve ``(license_key, instance_id)`` from the current
-    ``LocalSession``. When mode is community both are empty strings
-    so the C++ engine loads the bundled community model.
-
-    H4 audit fix: enforce expiry on the live session before
-    resolving, so an expired license is caught on the very next
-    inference call (within 60s) even if the heartbeat loop is
-    down or blocked.
-    """
-    from .billing.session import default_session
-    from .billing.enforcer import enforce_expiry
-    sess = default_session()
-    if enforce_expiry(sess):
-        # Persist the downgrade immediately so a follow-up
-        # ``compute_mode`` call (and a future heartbeat) sees the
-        # community state without waiting for the next save tick.
-        try:
-            sess.save()
-        except Exception:
-            pass
-    return resolve_license(sess)
 
 async def run_inference(camera_id: int, image_bytes: bytes, spaces: list, max_res: int = 1440):
     if not spaces: return {}, 0.0, (0, 0)
@@ -241,22 +112,7 @@ async def run_inference(camera_id: int, image_bytes: bytes, spaces: list, max_re
         loop = asyncio.get_running_loop()
         executor = get_inference_executor()
         
-        # Resolve license and enforce expiry safely on the main event loop under the lock
-        from .billing.session import default_session, session_update_lock
-        from .billing.enforcer import enforce_expiry, resolve_license
-        
-        async with session_update_lock():
-            sess = default_session()
-            if enforce_expiry(sess):
-                try:
-                    sess.save()
-                except Exception:
-                    pass
-            license_key, instance_id = resolve_license(sess)
-        
-        # get_vulturevision is now sync but uses a thread lock. 
-        # Model creation inside it is the heavy part.
-        vv = await asyncio.to_thread(get_vulturevision, license_key, instance_id)
+        vv = await asyncio.to_thread(get_vulturevision)
         start_time = time.perf_counter()
         
         probs = await loop.run_in_executor(

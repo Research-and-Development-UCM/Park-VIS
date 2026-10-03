@@ -130,7 +130,6 @@ def main():
         # Default settings
         defaults = {
             "inference_interval": "60",
-            "vulturevision_license": "",
             "confidence_threshold": "0.6",
             "retention_images_hours": "24",
             "retention_events_days": "30",
@@ -144,16 +143,6 @@ def main():
             "max_snapshot_resolution": "1920",
             "quality_snapshots": "85",
             "quality_crops": "90",
-            "billing_portal_url": "",
-            "billing_mode": "community",
-            "billing_quota": "0",
-            "billing_email": "",
-            "billing_trial_expires_at": "",
-            "billing_license_expires_at": "",
-            "last_heartbeat_at": "",
-            "last_heartbeat_status": "never",
-            "heartbeat_interval_seconds": "600",
-            "billing_api_token": "",
             # Alerting subsystem (system-wide; users supply their own SMTP)
             "alerting_enabled": "false",
             "alerting_smtp_host": "",
