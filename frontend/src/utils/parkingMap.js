@@ -39,7 +39,7 @@ export function statesFromCameras(cameras) {
 // This function is also included in the standalone HTML export.
 export function createParkingMap(L, element, initialLayout, initialStates = {}, callbacks = {}) {
   const map = L.map(element, { crs: L.CRS.Simple, minZoom: -12, maxZoom: 5, attributionControl: false, keyboard: !callbacks.move });
-  let layout = initialLayout, states = initialStates, selected = null, tracing = false, drawing = false, editing = false;
+  let layout = initialLayout, states = initialStates, selected = null, tracing = false, drawing = false, editing = false, backgroundVisible = true;
   const layers = L.layerGroup().addTo(map);
   const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function status(item) {
@@ -55,13 +55,13 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
     const width = item.width * scale, height = item.height * scale;
     const state = status(item);
     const car = '<svg viewBox="0 0 32 56" aria-hidden="true"><rect x="3" y="2" width="26" height="52" rx="8" fill="currentColor"/><path d="M7 15h18l-2-7H9zM7 39h18l-2 9H9z" fill="#fff" opacity=".6"/></svg>';
-    const html = `<div class="parking-object ${item.kind} ${state} ${selected === item.id ? 'selected' : ''} ${tracing ? 'tracing' : ''}" style="width:${width}px;height:${height}px;transform:rotate(${item.angle}deg);font-size:${Math.max(7,Math.min(12 * scale,width/4,height/3))}px" role="button" aria-label="${escape(item.name)}${item.kind === 'stall' ? ': ' + state : ''}"><span class="object-name">${escape(item.name)}</span>${item.kind === 'stall' ? (state === 'occupied' ? car : `<b class="parking-symbol">${state === 'unknown' ? '?' : 'P'}</b>`) + `<small>${state === 'unknown' ? 'No recent data' : state}</small>` : item.kind === 'entry' ? '<b class="entry-arrow">↑</b>' : ''}</div>`;
+    const html = `<div class="parking-object ${item.kind} ${state} ${selected === item.id ? 'selected' : ''} ${tracing && backgroundVisible && layout.background ? 'tracing' : ''}" style="width:${width}px;height:${height}px;transform:rotate(${item.angle}deg);font-size:${Math.max(7,Math.min(12 * scale,width/4,height/3))}px" role="button" aria-label="${escape(item.name)}${item.kind === 'stall' ? ': ' + state : ''}"><span class="object-name">${escape(item.name)}</span>${item.kind === 'stall' ? (state === 'occupied' ? car : `<b class="parking-symbol">${state === 'unknown' ? '?' : 'P'}</b>`) + `<small>${state === 'unknown' ? 'No recent data' : state}</small>` : item.kind === 'entry' ? '<b class="entry-arrow">↑</b>' : ''}</div>`;
     return L.divIcon({ className: 'parking-object-anchor', html, iconSize: [width,height], iconAnchor: [width/2,height/2] });
   }
   function render() {
     if (editing) return;
     layers.clearLayers();
-    if (layout.background) L.imageOverlay(layout.background, [[0,0],[layout.height,layout.width]], {opacity:tracing ? 1 : .65}).addTo(layers);
+    if (layout.background && backgroundVisible) L.imageOverlay(layout.background, [[0,0],[layout.height,layout.width]], {opacity:tracing ? 1 : .65}).addTo(layers);
     for (const item of layout.items) {
       const marker = L.marker([layout.height - item.y, item.x], {
         icon: icon(item), draggable: Boolean(callbacks.move) && !item.locked && !drawing, keyboard: true,
@@ -144,7 +144,7 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
   function fit() { map.invalidateSize(); map.fitBounds([[0,0],[layout.height,layout.width]], {padding:[30,30]}); }
   fit(); render();
   return {
-    map, fit, setTracing(value) { tracing = Boolean(value); render(); }, setDrawing(value) { cancelDraw();drawing=Boolean(value)&&Boolean(callbacks.draw);if(drawing)map.dragging.disable();else map.dragging.enable();element.classList.toggle('drawing-spaces',drawing);render(); }, destroy: () => {cancelDraw();map.remove();}, status,
+    map, fit, setBackgroundVisible(value) { backgroundVisible = Boolean(value); render(); }, setTracing(value) { tracing = Boolean(value); render(); }, setDrawing(value) { cancelDraw();drawing=Boolean(value)&&Boolean(callbacks.draw);if(drawing)map.dragging.disable();else map.dragging.enable();element.classList.toggle('drawing-spaces',drawing);render(); }, destroy: () => {cancelDraw();map.remove();}, status,
     update(nextLayout, nextStates = states, selectedId = null) { layout = nextLayout; states = nextStates; selected = selectedId; render(); },
   };
 }

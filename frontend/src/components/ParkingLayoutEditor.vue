@@ -11,7 +11,7 @@
     <template v-else>
       <div class="editor-toolbar">
         <div><button @click="add('stall')">+ Space</button><button :class="{active:drawing}" @click="toggleDrawing">{{ drawing ? 'Finish drawing' : 'Draw spaces' }}</button><button @click="add('road')">+ Road</button><button @click="add('label')">+ Label</button><button @click="add('entry')">+ Entrance</button></div>
-        <div><button :disabled="!selected" @click="copyObject">Copy</button><button :disabled="!copiedObject" @click="pasteObject">Paste</button><button :disabled="!selected" @click="duplicate">Duplicate</button><button :disabled="!undoStack.length" @click="undo">Undo</button><button @click="controller?.fit()">Fit map</button><button @click="toggleExpanded">{{ expanded ? 'Exit expanded view' : 'Expand workspace' }}</button><button v-if="layout.background" @click="toggleTracing">{{ tracing ? 'Standard view' : 'Trace aerial' }}</button><label class="file-button">Background<input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadBackground" /></label></div>
+        <div><button :disabled="!selected" @click="copyObject">Copy</button><button :disabled="!copiedObject" @click="pasteObject">Paste</button><button :disabled="!selected" @click="duplicate">Duplicate</button><button :disabled="!undoStack.length" @click="undo">Undo</button><button @click="controller?.fit()">Fit map</button><button @click="toggleExpanded">{{ expanded ? 'Exit expanded view' : 'Expand workspace' }}</button><button v-if="layout.background" :aria-pressed="!backgroundVisible" @click="toggleBackground">{{ backgroundVisible ? 'Hide background' : 'Show background' }}</button><button v-if="layout.background" @click="toggleTracing">{{ tracing ? 'Standard view' : 'Trace aerial' }}</button><label class="file-button">Background<input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadBackground" /></label></div>
       </div>
       <div class="editor-workspace">
         <div class="map-panel"><div ref="mapElement" class="parking-map"></div><div class="map-hint">{{ drawing ? 'Drag across a parking space to draw its box · Escape to finish' : 'Drag slots to move · Select a slot for resize and rotation handles · Scroll to zoom' }}</div></div>
@@ -71,7 +71,7 @@ const layout = ref(null), cameras = ref([]), states = ref({}), selectedId = ref(
 const mapElement = ref(null), message = ref(''), isError = ref(false), busy = ref(false), loadFailed = ref(false);
 const baseline = ref(''), undoStack = ref([]), viewKey = ref(''), backendUrl = ref(window.location.origin);
 const copiedObject = ref(null), repeatCount = ref(5), repeatGap = ref(10);
-const expanded = ref(false), tracing = ref(true), drawing = ref(false);
+const expanded = ref(false), tracing = ref(true), drawing = ref(false), backgroundVisible = ref(true);
 const row = ref({count:10,gap:4,width:24,height:48,direction:'right',x:100,y:100,angle:0,prefix:'P',start:1});
 const route = useRoute(), groups = ref([]), selectedLot = ref(''), lotsLoading = ref(true);
 const lotOptions = computed(() => [...groups.value.map(g=>({id:`group:${g.id}`,name:`${g.name} · parking lot`})),...cameras.value.map(c=>({id:`camera:${c.id}`,name:`${c.name} · single camera`})),{id:'overview',name:'All cameras · existing combined layout'}]);
@@ -96,6 +96,7 @@ function drawSpace(values) {
   checkpoint();const item = {id:crypto.randomUUID(),kind:'stall',name:row.value.prefix+row.value.start++, ...values,angle:0,locked:false,space_id:null};
   layout.value.items.push(item);select(item);
 }
+function toggleBackground() { backgroundVisible.value = !backgroundVisible.value; controller?.setBackgroundVisible(backgroundVisible.value); }
 function toggleTracing() { tracing.value = !tracing.value; controller?.setTracing(tracing.value); }
 function notify(text, error = false) { message.value = text; isError.value = error; }
 function errorText(e) { const detail = e.response?.data?.detail; return typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map(d => d.msg).join('; ') : e.message || 'Operation failed'; }
@@ -224,7 +225,7 @@ async function matchImageCanvas() {
 async function uploadBackground(event){
   const file=event.target.files?.[0];event.target.value='';if(!file)return;
   if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>15_000_000)return notify('Choose a PNG, JPEG, or WebP image smaller than 15 MB.',true);
-  try{const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});checkpoint();layout.value.background=data;notify('Background added. Save the layout to keep it.');}catch{notify('Unable to read background.',true);}
+  try{const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});checkpoint();layout.value.background=data;backgroundVisible.value=true;controller?.setBackgroundVisible(true);notify('Background added. Save the layout to keep it.');}catch{notify('Unable to read background.',true);}
 }
 async function importJson(event){
   const file=event.target.files?.[0];event.target.value='';if(!file)return;
@@ -256,7 +257,7 @@ async function loadLot(choice) {
   if (!lotOptions.value.some(l=>l.id===choice)) return;
   busy.value=true;selectedLot.value=choice;loadFailed.value=false;
   controller?.destroy();controller=null;observer?.disconnect();observer=null;
-  layout.value=null;selectedId.value=null;drawing.value=false;undoStack.value=[];copiedObject.value=null;viewKey.value='';message.value='';
+  layout.value=null;selectedId.value=null;drawing.value=false;backgroundVisible.value=true;undoStack.value=[];copiedObject.value=null;viewKey.value='';message.value='';
   try {
     const {data}=await axios.get('/api/parking-layout',{params:lotParams()});if(disposed)return;
     layout.value=data.layout||defaultLayout(lotCameras.value);
