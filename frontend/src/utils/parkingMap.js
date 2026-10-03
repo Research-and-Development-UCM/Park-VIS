@@ -63,7 +63,7 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
     if (layout.background) L.imageOverlay(layout.background, [[0,0],[layout.height,layout.width]], {opacity:.65}).addTo(layers);
     for (const item of layout.items) {
       const marker = L.marker([layout.height - item.y, item.x], {
-        icon: icon(item), draggable: Boolean(callbacks.move), keyboard: true,
+        icon: icon(item), draggable: Boolean(callbacks.move) && !item.locked, keyboard: true,
         title: item.name, zIndexOffset: item.kind === 'road' ? -10000 : 1000,
       }).addTo(layers);
       marker.on('click', () => {
@@ -71,6 +71,7 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
         else marker.bindPopup(`${escape(item.name)}${item.kind === 'stall' ? ': ' + status(item) : ''}`).openPopup();
       });
       marker.on('dragend', () => {
+        if (item.locked) return;
         const pos = marker.getLatLng();
         callbacks.move?.(item, Math.max(0,Math.min(layout.width,pos.lng)), Math.max(0,Math.min(layout.height,layout.height-pos.lat)));
       });

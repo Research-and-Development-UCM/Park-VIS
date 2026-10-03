@@ -29,6 +29,7 @@ class LayoutItem(BaseModel):
     width: float = Field(ge=8, le=2000)
     height: float = Field(ge=8, le=2000)
     angle: float = Field(default=0, ge=-360, le=360)
+    locked: bool = Field(default=False, strict=True)
     space_id: int | None = Field(default=None, ge=1)
 
 

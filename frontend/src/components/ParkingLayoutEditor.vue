@@ -19,13 +19,13 @@
           <div class="inspector-tabs"><button :class="{ active: tab === 'object' }" @click="tab = 'object'">Object</button><button :class="{ active: tab === 'layout' }" @click="tab = 'layout'">Layout & export</button></div>
           <template v-if="tab === 'object'">
             <template v-if="selected">
-              <h2>{{ selected.kind === 'stall' ? 'Parking space' : selected.kind }}</h2>
+              <button @click="change('locked', !selected.locked)">{{ selected.locked ? 'Unlock item' : 'Lock item' }}</button><p v-if="selected.locked" class="helper">Position, size, rotation, and removal are locked.</p><h2>{{ selected.kind === 'stall' ? 'Parking space' : selected.kind }}</h2>
               <label>Name<input :value="selected.name" maxlength="80" @change="change('name', $event.target.value)" /></label>
               <label v-if="selected.kind === 'stall'">Live camera space<select :value="selected.space_id ?? ''" @change="change('space_id', $event.target.value ? Number($event.target.value) : null)"><option value="">Unlinked · unknown status</option><option v-for="s in linkOptions" :key="s.id" :value="s.id" :disabled="linkedElsewhere(s.id)">{{ s.camera_name }} / {{ s.name }}{{ linkedElsewhere(s.id) ? ' (already linked)' : '' }}</option></select></label>
-              <div class="input-pair"><label>X<input type="number" :value="selected.x" min="0" :max="layout.width" @change="changeNumber('x', $event, 0, layout.width)" /></label><label>Y<input type="number" :value="selected.y" min="0" :max="layout.height" @change="changeNumber('y', $event, 0, layout.height)" /></label></div>
-              <div class="input-pair"><label>Width<input type="number" :value="selected.width" min="8" max="2000" @change="changeNumber('width', $event, 8, 2000)" /></label><label>Height<input type="number" :value="selected.height" min="8" max="2000" @change="changeNumber('height', $event, 8, 2000)" /></label></div>
-              <label>Rotation · degrees<input type="number" :value="selected.angle" min="-360" max="360" @change="changeNumber('angle', $event, -360, 360)" /></label>
-              <div class="inspector-actions"><button @click="duplicate">Duplicate</button><button class="danger" @click="remove">Remove</button></div>
+              <div class="input-pair"><label>X<input type="number" :disabled="selected.locked" :value="selected.x" min="0" :max="layout.width" @change="changeNumber('x', $event, 0, layout.width)" /></label><label>Y<input type="number" :disabled="selected.locked" :value="selected.y" min="0" :max="layout.height" @change="changeNumber('y', $event, 0, layout.height)" /></label></div>
+              <div class="input-pair"><label>Width<input type="number" :disabled="selected.locked" :value="selected.width" min="8" max="2000" @change="changeNumber('width', $event, 8, 2000)" /></label><label>Height<input type="number" :disabled="selected.locked" :value="selected.height" min="8" max="2000" @change="changeNumber('height', $event, 8, 2000)" /></label></div>
+              <label>Rotation · degrees<input type="number" :disabled="selected.locked" :value="selected.angle" min="-360" max="360" @change="changeNumber('angle', $event, -360, 360)" /></label>
+              <div class="inspector-actions"><button @click="duplicate">Duplicate</button><button class="danger" :disabled="selected.locked" @click="remove">Remove</button></div>
               <h3 class="mt-4">Repeat spaces</h3>
               <div class="input-pair"><label>Copies<input v-model.number="repeatCount" type="number" min="1" max="100" /></label><label>Gap<input v-model.number="repeatGap" type="number" min="0" max="1000" /></label></div>
               <div class="inspector-actions"><button @click="repeatObjects('x')">Copy row →</button><button @click="repeatObjects('y')">Copy column ↓</button></div>
@@ -33,7 +33,13 @@
               <p class="helper">Removing a display object leaves the camera space and its detection outline intact.</p>
             </template>
             <div v-else class="selection-empty"><span>↖</span><h2>Select an object</h2><p>Click a space, road, or label to change its size, rotation, and live link.</p></div>
-            <hr /><h3>Objects <span>{{ layout.items.length }}</span></h3>
+            <hr /><section class="space-generator"><h3>Build parking row</h3><p class="helper">Count includes the first space. Gap is the clear distance between slots. Directions follow the slot rotation.</p>
+<div class="input-pair"><label>Space count<input v-model.number="row.count" type="number" min="1" max="1000" /></label><label>Gap<input v-model.number="row.gap" type="number" min="0" max="1000" /></label></div>
+<div class="input-pair"><label>Slot width<input v-model.number="row.width" type="number" min="8" max="2000" /></label><label>Slot height<input v-model.number="row.height" type="number" min="8" max="2000" /></label></div>
+<label>Extend direction<select v-model="row.direction"><option value="right">Right (+ horizontal) →</option><option value="left">Left (− horizontal) ←</option><option value="down">Down (+ vertical) ↓</option><option value="up">Up (− vertical) ↑</option></select></label>
+<div class="input-pair"><label>Start X<input v-model.number="row.x" type="number" min="0" :max="layout.width" /></label><label>Start Y<input v-model.number="row.y" type="number" min="0" :max="layout.height" /></label></div>
+<label>Slot rotation · degrees<input v-model.number="row.angle" type="number" min="-360" max="360" /></label><label>Name prefix<input v-model="row.prefix" maxlength="60" /></label><label>Starting number<input v-model.number="row.start" type="number" min="1" max="1000000" /></label>
+<div class="inspector-actions"><button :disabled="!selected" @click="useSelectedForRow">Use selected position & size</button><button @click="buildRow">Add parking row</button></div></section><hr /><h3>Objects <span>{{ layout.items.length }}</span></h3>
             <div class="object-list"><button v-for="item in layout.items" :key="item.id" :class="{ active: selectedId === item.id }" @click="select(item)"><span>{{ item.kind === 'stall' ? '▣' : item.kind === 'road' ? '━' : item.kind === 'entry' ? '↑' : 'T' }}</span>{{ item.name || 'Untitled' }}</button></div>
           </template>
           <template v-else>
@@ -65,6 +71,7 @@ const layout = ref(null), cameras = ref([]), states = ref({}), selectedId = ref(
 const mapElement = ref(null), message = ref(''), isError = ref(false), busy = ref(false), loadFailed = ref(false);
 const baseline = ref(''), undoStack = ref([]), viewKey = ref(''), backendUrl = ref(window.location.origin);
 const copiedObject = ref(null), repeatCount = ref(5), repeatGap = ref(10);
+const row = ref({count:10,gap:4,width:24,height:48,direction:'right',x:100,y:100,angle:0,prefix:'P',start:1});
 const route = useRoute(), groups = ref([]), selectedLot = ref(''), lotsLoading = ref(true);
 const lotOptions = computed(() => [...groups.value.map(g=>({id:`group:${g.id}`,name:`${g.name} · parking lot`})),...cameras.value.map(c=>({id:`camera:${c.id}`,name:`${c.name} · single camera`})),{id:'overview',name:'All cameras · existing combined layout'}]);
 const lotParams = () => selectedLot.value === 'overview' ? {} : {lot:selectedLot.value};
@@ -86,9 +93,9 @@ function checkpoint() { undoStack.value.push(JSON.stringify(layout.value)); if (
 function undo() { if (undoStack.value.length) { layout.value = JSON.parse(undoStack.value.pop()); if (!selected.value) selectedId.value = null; } }
 function select(item) { selectedId.value = item.id; tab.value = 'object'; }
 function linkedElsewhere(id) { return layout.value.items.some(i => i.id !== selectedId.value && i.space_id === id); }
-function change(key, value) { if (!selected.value) return; checkpoint(); selected.value[key] = value; }
+function change(key, value) { if (!selected.value || (selected.value.locked && ['x','y','width','height','angle'].includes(key))) return; checkpoint(); selected.value[key] = value; }
 function changeNumber(key, event, min, max) { const value = Number(event.target.value); if (!Number.isFinite(value)) return; change(key, Math.max(min,Math.min(max,value))); }
-function resize(key,event) { const value = Number(event.target.value); if (!Number.isFinite(value)) return; checkpoint(); layout.value[key] = Math.round(Math.max(200,Math.min(10000,value))); for (const item of layout.value.items) { item.x = Math.min(item.x,layout.value.width); item.y = Math.min(item.y,layout.value.height); } nextTick(() => controller?.fit()); }
+function resize(key,event) { const value = Number(event.target.value); if (!Number.isFinite(value)) return; const size = Math.round(Math.max(200,Math.min(10000,value))); if (layout.value.items.some(i=>i.locked && i[key === 'width' ? 'x' : 'y'] > size)) return notify('Unlock items outside the new canvas before shrinking it.',true); checkpoint(); layout.value[key] = size; for (const item of layout.value.items) { item.x = Math.min(item.x,layout.value.width); item.y = Math.min(item.y,layout.value.height); } nextTick(() => controller?.fit()); }
 function add(kind) {
   if (layout.value.items.length >= 1000) return notify('A layout can contain up to 1,000 objects.',true);
   checkpoint();
@@ -99,7 +106,7 @@ function add(kind) {
   layout.value.items.push(item);select(item);
 }
 function copyObject() { if (!selected.value) return; copiedObject.value = {...selected.value}; notify('Object copied. Paste creates an unlinked copy.'); }
-function insertCopy(source, x, y) { const item = {...source,id:crypto.randomUUID(),x,y,space_id:null}; layout.value.items.push(item); return item; }
+function insertCopy(source, x, y) { const item = {...source,id:crypto.randomUUID(),x,y,space_id:null,locked:false}; layout.value.items.push(item); return item; }
 function pasteObject() {
   if (!copiedObject.value || !layout.value) return;
   if (layout.value.items.length >= 1000) return notify('A layout can contain up to 1,000 objects.',true);
@@ -122,7 +129,31 @@ function repeatObjects(axis) {
   for (const p of positions) last = insertCopy(source,Math.round(p.x),Math.round(p.y));
   select(last); notify(`${count} unlinked copies added. Undo removes the entire group.`);
 }
-function remove() { if (!selected.value) return; checkpoint();layout.value.items = layout.value.items.filter(i=>i.id!==selectedId.value);selectedId.value=null; }
+function useSelectedForRow() {
+  if (!selected.value) return;
+  for (const key of ['x','y','width','height','angle']) row.value[key] = selected.value[key];
+}
+function buildRow() {
+  const r = row.value;
+  if (!Number.isInteger(r.count) || r.count < 1 || r.count > 1000 || !Number.isInteger(r.start) || r.start < 1 || r.start > 1000000 ||
+      !['x','y','width','height','angle','gap'].every(k=>Number.isFinite(r[k])) || r.width < 8 || r.width > 2000 || r.height < 8 || r.height > 2000 || r.gap < 0 || r.gap > 1000 || Math.abs(r.angle) > 360)
+    return notify('Enter valid count, dimensions, gap, position, rotation, and starting number.',true);
+  if (layout.value.items.length + r.count > 1000) return notify('A layout can contain up to 1,000 objects.',true);
+  const horizontal = ['left','right'].includes(r.direction), sign = ['left','up'].includes(r.direction) ? -1 : 1;
+  const radians = r.angle * Math.PI / 180, spacing = (horizontal ? r.width : r.height) + r.gap;
+  const dx = sign * spacing * (horizontal ? Math.cos(radians) : -Math.sin(radians));
+  const dy = sign * spacing * (horizontal ? Math.sin(radians) : Math.cos(radians));
+  const halfWidth = (Math.abs(Math.cos(radians))*r.width + Math.abs(Math.sin(radians))*r.height)/2;
+  const halfHeight = (Math.abs(Math.sin(radians))*r.width + Math.abs(Math.cos(radians))*r.height)/2;
+  const positions = Array.from({length:r.count},(_,i)=>({x:r.x+dx*i,y:r.y+dy*i}));
+  if (positions.some(p=>p.x-halfWidth < -1e-8 || p.y-halfHeight < -1e-8 || p.x+halfWidth > layout.value.width+1e-8 || p.y+halfHeight > layout.value.height+1e-8))
+    return notify('The row does not fit on the canvas. Adjust its start, count, gap, or canvas size.',true);
+  checkpoint();
+  const items = positions.map((p,i)=>({id:crypto.randomUUID(),kind:'stall',name:r.prefix+(r.start+i), ...p,width:r.width,height:r.height,angle:r.angle,space_id:null,locked:false}));
+  layout.value.items.push(...items);select(items[0]);row.value.start += r.count;
+  notify(r.count+' unlinked parking spaces added. Undo removes the entire row.');
+}
+function remove() { if (!selected.value || selected.value.locked) return; checkpoint();layout.value.items = layout.value.items.filter(i=>i.id!==selectedId.value);selectedId.value=null; }
 function keyboard(event) {
   if (!layout.value || busy.value || event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])') || event.isComposing) return;
   const command = event.ctrlKey || event.metaKey, key = event.key.toLowerCase();
@@ -133,6 +164,7 @@ function keyboard(event) {
   if (!selected.value) return;
   if (event.key === 'Delete' || event.key === 'Backspace') {event.preventDefault();remove();return;}
   if (event.key === 'Escape') {selectedId.value=null;return;}
+  if (selected.value.locked) return;
   const direction = {ArrowLeft:['x',-1],ArrowRight:['x',1],ArrowUp:['y',-1],ArrowDown:['y',1]}[event.key];
   if (!direction) return;
   event.preventDefault();const [axis,sign] = direction, step = event.shiftKey ? 10 : 1;
@@ -149,7 +181,7 @@ async function refresh() {
 }
 async function save() {
   busy.value=true;
-  try {const {data}=await axios.put('/api/parking-layout',layout.value,{params:lotParams()});baseline.value=JSON.stringify(data.layout);notify('Layout saved. This parking lot now uses this arrangement.');return true;}
+  try {const {data}=await axios.put('/api/parking-layout',layout.value,{params:lotParams()});layout.value=data.layout;baseline.value=JSON.stringify(data.layout);notify('Layout saved. This parking lot now uses this arrangement.');return true;}
   catch(e){notify(errorText(e),true);return false;}finally{busy.value=false;}
 }
 function downloadJson(){downloadFile('parking-layout.json',JSON.stringify(layout.value,null,2),'application/json');notify('Editable layout exported.');}
@@ -180,6 +212,7 @@ async function importJson(event){
     const ids=new Set(),links=new Set();
     for(const item of value.items){
       if(typeof item.id!=='string'||!item.id||item.id.length>80||ids.has(item.id)||!['stall','road','label','entry'].includes(item.kind)||typeof item.name!=='string'||item.name.length>80||!['x','y','width','height','angle'].every(k=>typeof item[k]==='number'&&Number.isFinite(item[k]))||item.x<0||item.x>value.width||item.y<0||item.y>value.height||item.width<8||item.width>2000||item.height<8||item.height>2000||Math.abs(item.angle)>360)throw new Error('Invalid layout object.');
+      if(item.locked !== undefined && typeof item.locked !== 'boolean')throw new Error('Invalid lock setting.');
       ids.add(item.id);
       if(item.space_id!==null&&(!Number.isInteger(item.space_id)||item.space_id<1||item.kind!=='stall'||links.has(item.space_id)))throw new Error('Invalid or duplicate camera-space link.');
       if(item.space_id)links.add(item.space_id);
@@ -206,7 +239,7 @@ async function loadLot(choice) {
     if(!data.layout)layout.value.name=lotOptions.value.find(l=>l.id===choice).name.split(' · ')[0];
     baseline.value=data.layout?JSON.stringify(layout.value):'';
     await nextTick();if(disposed)return;
-    controller=createParkingMap(L,mapElement.value,layout.value,states.value,{select,move(item,x,y){checkpoint();item.x=Math.min(layout.value.width,Math.round(x/10)*10);item.y=Math.min(layout.value.height,Math.round(y/10)*10);}});
+    controller=createParkingMap(L,mapElement.value,layout.value,states.value,{select,move(item,x,y){if(item.locked)return;checkpoint();item.x=Math.min(layout.value.width,Math.round(x/10)*10);item.y=Math.min(layout.value.height,Math.round(y/10)*10);}});
     observer=new ResizeObserver(()=>controller?.map.invalidateSize());observer.observe(mapElement.value);
   }catch(e){loadFailed.value=true;notify(errorText(e),true);}finally{busy.value=false;}
 }
