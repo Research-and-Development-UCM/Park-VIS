@@ -1,4 +1,4 @@
-param([switch]$FrontendOnly)
+param([switch]$FrontendOnly, [switch]$WithTestData)
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $env:CONDA_PKGS_DIRS = "$PSScriptRoot/.tools/pkgs"
@@ -21,6 +21,10 @@ if (-not $FrontendOnly) {
     Copy-Item -LiteralPath 'scripts/sitecustomize.py' -Destination '.dev-env/Lib/site-packages/sitecustomize.py' -Force
     & "$PSScriptRoot/.dev-env/python.exe" windows/patch_pyd.py .dev-env/Lib/site-packages/vulturevision/_vulturevision.pyd
     if ($LASTEXITCODE -ne 0) { throw 'AI engine Windows compatibility patch failed.' }
+}
+if ($WithTestData) {
+    & "$PSScriptRoot/.dev-env/python.exe" scripts/seed-test-database.py
+    if ($LASTEXITCODE -ne 0) { throw 'Test data installation failed; existing data was preserved.' }
 }
 $env:PATH = "$PSScriptRoot/.dev-env;$PSScriptRoot/.dev-env/Scripts;$env:PATH"
 $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue

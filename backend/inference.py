@@ -147,7 +147,14 @@ def get_vulturevision(license_key=None, instance_id=None):
                     gpu=use_gpu, res=max_res,
                     mode="commercial" if license_key else "community")
         try:
+            repository_model = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "parking-occupancy.encs")
+            model_path = repository_model if not license_key and os.path.isfile(repository_model) else None
+            if model_path and os.path.getsize(model_path) < 1024:
+                with open(model_path, "rb") as model_file:
+                    if model_file.read(80).startswith(b"version https://git-lfs.github.com/spec/v1"):
+                        raise RuntimeError("The AI model is a Git LFS pointer. Run git lfs pull first.")
             new_instance = VultureVision(
+                model_path=model_path,
                 license_key=license_key,
                 instance_id=instance_id,
                 use_gpu=use_gpu,
