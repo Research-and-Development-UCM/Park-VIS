@@ -12,7 +12,7 @@ SAFE_SETTINGS = {'inference_interval', 'confidence_threshold', 'retention_images
                  'retention_events_days', 'retention_raw_data_days', 'retention_hourly_data_days',
                  'inference_device', 'max_inference_resolution', 'hysteresis_occupied_threshold',
                  'hysteresis_free_threshold', 'optimization_interval_days',
-                 'max_snapshot_resolution', 'quality_snapshots', 'quality_crops', 'eula_accepted'}
+                 'max_snapshot_resolution', 'quality_snapshots', 'quality_crops'}
 
 def export():
     FIXTURES.mkdir(exist_ok=True)

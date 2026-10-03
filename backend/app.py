@@ -260,51 +260,15 @@ async def setup_status(db: Session = Depends(get_db)):
             .filter(models.User.is_admin == True)
             .first()
         )
-        eula_status = db.query(models.Setting).filter_by(key="eula_accepted").first()
         return schemas.SetupStatus(
             setup_required=any_admin is None,
             has_any_user=any_user is not None,
-            eula_accepted=eula_status.value == "true" if eula_status else False,
         )
-
-
-@app.get("/api/setup/eula")
-async def get_eula_text():
-    """Retrieve the static EULA.txt file content.
-
-    Resolution order:
-      1. config.LV_HOME/EULA.txt
-      2. backend_dir/../EULA.txt
-      3. backend_dir/EULA.txt
-    """
-    import os
-    import sys
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    meipass = getattr(sys, "_MEIPASS", None)
-    paths_to_check = [
-        os.path.join(config.LV_HOME, "EULA.txt"),
-        os.path.join(os.path.dirname(backend_dir), "EULA.txt"),
-        os.path.join(backend_dir, "EULA.txt"),
-    ]
-    if meipass:
-        paths_to_check.append(os.path.join(meipass, "EULA.txt"))
-    paths_to_check.append(os.path.join(os.path.dirname(sys.executable), "EULA.txt"))
-    paths_to_check.append(os.path.join(os.path.dirname(sys.executable), "_internal", "EULA.txt"))
-    for path in paths_to_check:
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return {"eula_text": f.read()}
-            except Exception as e:
-                logger.error("Failed to read EULA file at {path}: {e}", path=path, e=e)
-    
-    return {"eula_text": "Error: EULA.txt file not found on server."}
 
 
 @app.post("/api/setup/admin", response_model=schemas.UserOut)
 async def setup_create_first_admin(
     body: schemas.FirstAdminCreate,
-    request: Request,
     db: Session = Depends(get_db),
 ):
     tracer = trace.get_tracer(__name__)
@@ -321,12 +285,6 @@ async def setup_create_first_admin(
             raise HTTPException(
                 status_code=409,
                 detail="An administrator already exists. Use the Users page to add more accounts.",
-            )
-
-        if not body.accept_eula:
-            raise HTTPException(
-                status_code=400,
-                detail="You must accept the End User License Agreement to proceed.",
             )
 
         # Username uniqueness check
@@ -354,21 +312,6 @@ async def setup_create_first_admin(
         )
 
         db.add(admin)
-
-        # Record EULA acceptance
-        from datetime import datetime, UTC
-        eula_records = {
-            "eula_accepted": "true",
-            "eula_accepted_at": datetime.now(UTC).isoformat(),
-            "eula_accepted_by": body.username,
-            "eula_accepted_ip": request.client.host if request.client else "unknown",
-        }
-        for k, v in eula_records.items():
-            record = db.query(models.Setting).filter_by(key=k).first()
-            if record:
-                record.value = v
-            else:
-                db.add(models.Setting(key=k, value=v))
 
         db.commit()
         db.refresh(admin)

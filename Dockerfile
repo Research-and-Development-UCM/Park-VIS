@@ -58,7 +58,6 @@ COPY main.py ./
 COPY models/ ./models/
 COPY fixtures/ ./fixtures/
 COPY scripts/ ./scripts/
-COPY fixtures/EULA.txt ./EULA.txt
 
 # Copy the pre-built frontend from stage 1
 COPY --from=frontend-build /build/frontend/dist ./frontend/dist

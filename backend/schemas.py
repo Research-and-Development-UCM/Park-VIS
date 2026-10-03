@@ -151,7 +151,6 @@ class FirstAdminCreate(BaseModel):
     """
     username: str
     password: str
-    accept_eula: bool
 
 
 class SetupStatus(BaseModel):
@@ -160,7 +159,6 @@ class SetupStatus(BaseModel):
     """
     setup_required: bool
     has_any_user: bool
-    eula_accepted: bool
 
 
 class UserUpdate(BaseModel):

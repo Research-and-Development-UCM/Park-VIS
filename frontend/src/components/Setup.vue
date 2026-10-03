@@ -63,24 +63,6 @@
                   class="mb-4"
                 />
 
-                <!-- End User License Agreement (EULA) -->
-                <div class="mb-4">
-                  <div class="text-subtitle-2 mb-1">End User License Agreement</div>
-                  <div
-                    class="pa-3 border rounded mb-2 overflow-y-auto"
-                    style="max-height: 180px; font-size: 0.75rem; line-height: 1.3; background: rgba(0,0,0,0.03); border: 1px solid rgba(0, 0, 0, 0.12);"
-                  >
-                    <pre style="white-space: pre-wrap; font-family: inherit; margin: 0;">{{ eulaText }}</pre>
-                  </div>
-                  <v-checkbox
-                    v-model="acceptEula"
-                    label="I accept the End User License Agreement"
-                    :rules="[v => !!v || 'You must accept the EULA to continue']"
-                    density="compact"
-                    hide-details
-                  />
-                </div>
-
                 <v-alert
                   v-if="error"
                   type="error"
@@ -130,8 +112,6 @@ const form = ref(null)
 const loading = ref(false)
 const error = ref('')
 const setupDisabled = ref(false)
-const acceptEula = ref(false)
-const eulaText = ref('Loading EULA...')
 
 const usernameRules = [
   v => !!v || 'Username is required',
@@ -160,15 +140,6 @@ async function checkStatus() {
   }
 }
 
-async function loadEula() {
-  try {
-    const res = await axios.get('/api/setup/eula')
-    eulaText.value = res.data.eula_text
-  } catch (e) {
-    eulaText.value = 'Failed to load End User License Agreement. Please refresh the page.'
-  }
-}
-
 async function submit() {
   if (!form.value || !(await form.value.validate()).valid) return
   loading.value = true
@@ -177,7 +148,6 @@ async function submit() {
     await axios.post('/api/setup/admin', {
       username: username.value,
       password: password.value,
-      accept_eula: acceptEula.value,
     })
     // Auto-login: hit /api/login with the same credentials, then
     // redirect to /cameras like the normal login flow.
@@ -201,6 +171,5 @@ async function submit() {
 
 onMounted(() => {
   checkStatus()
-  loadEula()
 })
 </script>

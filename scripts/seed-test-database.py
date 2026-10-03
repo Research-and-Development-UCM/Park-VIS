@@ -19,5 +19,4 @@ with source.open('rb') as file:
         parser.error('The database is a Git LFS pointer. Run git lfs pull first.')
 destination.mkdir(parents=True, exist_ok=True)
 shutil.copy2(source, database)
-shutil.copy2(ROOT / 'fixtures/EULA.txt', destination / 'EULA.txt')
 print('Test data installed. Included accounts keep their existing passwords.')

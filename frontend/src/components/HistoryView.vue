@@ -336,25 +336,20 @@
       </div>
     </v-sheet>
 
-    <v-dialog v-model="showLegalDialog" max-width="500">
+    <v-dialog v-model="showFeedbackDialog" max-width="500">
       <v-card>
         <v-card-title class="text-h6 bg-error text-white">
-          <v-icon start icon="mdi-gavel" class="mr-2"></v-icon>
-          Legal Agreement
+          <v-icon start icon="mdi-send" class="mr-2"></v-icon>
+          Submit feedback
         </v-card-title>
         <v-card-text class="pa-6">
-          <p class="text-body-1 mb-4">
-            By submitting this AI improvement, you are granting <strong>Lot Vulture LLC</strong> the irrevocable, world-wide, royalty-free right to use, reproduce, modify, and distribute these images and their associated annotations.
-          </p>
-          <p class="text-body-2 text-grey-darken-1">
-            This data will be used to retrain our AI models and may be included in datasets for commercial distribution. Please ensure you have the authority to grant these rights for this camera feed.
-          </p>
+          <p class="text-body-1">Submit the selected camera image and occupancy corrections to the configured training service?</p>
         </v-card-text>
         <v-divider></v-divider>
         <v-card-actions class="pa-4">
           <v-spacer></v-spacer>
-          <v-btn variant="text" @click="showLegalDialog = false">Cancel</v-btn>
-          <v-btn color="error" variant="flat" @click="confirmSubmit">Agree & Submit</v-btn>
+          <v-btn variant="text" @click="showFeedbackDialog = false">Cancel</v-btn>
+          <v-btn color="error" variant="flat" @click="confirmSubmit">Submit feedback</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -408,7 +403,7 @@ const hasPermission = (p) => {
 
 const isFeedbackMode = ref(false);
 const feedbackSubmitting = ref(false);
-const showLegalDialog = ref(false);
+const showFeedbackDialog = ref(false);
 const snackbar = ref({ show: false, text: '', color: 'success' });
 
 // Pending feedback uploads to the S3 training bucket. Surfaced as
@@ -857,11 +852,11 @@ const toggleSpaceFeedback = (space) => {
 
 const submitFeedback = () => {
   if (!currentScan.value || !selectedCameraId.value) return;
-  showLegalDialog.value = true;
+  showFeedbackDialog.value = true;
 };
 
 const confirmSubmit = async () => {
-  showLegalDialog.value = false;
+  showFeedbackDialog.value = false;
   feedbackSubmitting.value = true;
   try {
     const payload = {
