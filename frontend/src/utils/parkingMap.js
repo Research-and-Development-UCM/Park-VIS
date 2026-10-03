@@ -38,8 +38,8 @@ export function statesFromCameras(cameras) {
 
 // This function is also included in the standalone HTML export.
 export function createParkingMap(L, element, initialLayout, initialStates = {}, callbacks = {}) {
-  const map = L.map(element, { crs: L.CRS.Simple, minZoom: -5, maxZoom: 3, attributionControl: false, keyboard: !callbacks.move });
-  let layout = initialLayout, states = initialStates, selected = null;
+  const map = L.map(element, { crs: L.CRS.Simple, minZoom: -5, maxZoom: 5, attributionControl: false, keyboard: !callbacks.move });
+  let layout = initialLayout, states = initialStates, selected = null, tracing = false;
   const layers = L.layerGroup().addTo(map);
   const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function status(item) {
@@ -55,12 +55,12 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
     const width = item.width * scale, height = item.height * scale;
     const state = status(item);
     const car = '<svg viewBox="0 0 32 56" aria-hidden="true"><rect x="3" y="2" width="26" height="52" rx="8" fill="currentColor"/><path d="M7 15h18l-2-7H9zM7 39h18l-2 9H9z" fill="#fff" opacity=".6"/></svg>';
-    const html = `<div class="parking-object ${item.kind} ${state} ${selected === item.id ? 'selected' : ''}" style="width:${width}px;height:${height}px;transform:rotate(${item.angle}deg);font-size:${Math.max(7,12 * scale)}px" role="button" aria-label="${escape(item.name)}${item.kind === 'stall' ? ': ' + state : ''}"><span class="object-name">${escape(item.name)}</span>${item.kind === 'stall' ? (state === 'occupied' ? car : `<b class="parking-symbol">${state === 'unknown' ? '?' : 'P'}</b>`) + `<small>${state === 'unknown' ? 'No recent data' : state}</small>` : item.kind === 'entry' ? '<b class="entry-arrow">↑</b>' : ''}</div>`;
+    const html = `<div class="parking-object ${item.kind} ${state} ${selected === item.id ? 'selected' : ''} ${tracing ? 'tracing' : ''}" style="width:${width}px;height:${height}px;transform:rotate(${item.angle}deg);font-size:${Math.max(7,12 * scale)}px" role="button" aria-label="${escape(item.name)}${item.kind === 'stall' ? ': ' + state : ''}"><span class="object-name">${escape(item.name)}</span>${item.kind === 'stall' ? (state === 'occupied' ? car : `<b class="parking-symbol">${state === 'unknown' ? '?' : 'P'}</b>`) + `<small>${state === 'unknown' ? 'No recent data' : state}</small>` : item.kind === 'entry' ? '<b class="entry-arrow">↑</b>' : ''}</div>`;
     return L.divIcon({ className: 'parking-object-anchor', html, iconSize: [width,height], iconAnchor: [width/2,height/2] });
   }
   function render() {
     layers.clearLayers();
-    if (layout.background) L.imageOverlay(layout.background, [[0,0],[layout.height,layout.width]], {opacity:.65}).addTo(layers);
+    if (layout.background) L.imageOverlay(layout.background, [[0,0],[layout.height,layout.width]], {opacity:tracing ? 1 : .65}).addTo(layers);
     for (const item of layout.items) {
       const marker = L.marker([layout.height - item.y, item.x], {
         icon: icon(item), draggable: Boolean(callbacks.move) && !item.locked, keyboard: true,
@@ -81,13 +81,14 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
   function fit() { map.invalidateSize(); map.fitBounds([[0,0],[layout.height,layout.width]], {padding:[30,30]}); }
   fit(); render();
   return {
-    map, fit, destroy: () => map.remove(), status,
+    map, fit, setTracing(value) { tracing = Boolean(value); render(); }, destroy: () => map.remove(), status,
     update(nextLayout, nextStates = states, selectedId = null) { layout = nextLayout; states = nextStates; selected = selectedId; render(); },
   };
 }
 
 export const parkingMapStyle = `
 .parking-map{height:100%;min-height:420px;background-color:#eae4d5;background-image:linear-gradient(#c9beaa55 1px,transparent 1px),linear-gradient(90deg,#c9beaa55 1px,transparent 1px);background-size:24px 24px}
+.parking-object.stall.tracing{background:transparent;border-color:#ffe66b;color:#fff;text-shadow:0 1px 3px #000}.parking-object.stall.tracing .parking-symbol,.parking-object.stall.tracing small,.parking-object.stall.tracing svg{display:none}
 .parking-object-anchor{background:none;border:0}
 .parking-object{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:space-between;gap:3px;padding:5%;color:#59613b;text-align:center;transform-origin:center;overflow:hidden;cursor:pointer;font-family:Courier New,monospace}
 .parking-object.stall{background:#dce1c4;border:2px solid #8e9a63;border-bottom-width:5px;border-radius:7px 7px 1px 1px}

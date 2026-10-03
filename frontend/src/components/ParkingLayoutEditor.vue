@@ -1,5 +1,5 @@
 <template>
-  <section class="layout-editor">
+  <section class="layout-editor" :class="{ expanded }">
     <header class="editor-heading">
       <div><span class="eyebrow">PARKING LAYOUT</span><h1>Make the lot your own.</h1><p>Arrange your display without changing camera detection.</p></div>
       <div class="heading-actions"><router-link :to="dashboardLink">View this lot live</router-link><button class="primary" :disabled="busy || !layout" @click="save">{{ busy ? 'Saving…' : dirty ? 'Save layout •' : 'Save layout' }}</button></div>
@@ -11,7 +11,7 @@
     <template v-else>
       <div class="editor-toolbar">
         <div><button @click="add('stall')">+ Space</button><button @click="add('road')">+ Road</button><button @click="add('label')">+ Label</button><button @click="add('entry')">+ Entrance</button></div>
-        <div><button :disabled="!selected" @click="copyObject">Copy</button><button :disabled="!copiedObject" @click="pasteObject">Paste</button><button :disabled="!selected" @click="duplicate">Duplicate</button><button :disabled="!undoStack.length" @click="undo">Undo</button><button @click="controller?.fit()">Fit map</button><label class="file-button">Background<input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadBackground" /></label></div>
+        <div><button :disabled="!selected" @click="copyObject">Copy</button><button :disabled="!copiedObject" @click="pasteObject">Paste</button><button :disabled="!selected" @click="duplicate">Duplicate</button><button :disabled="!undoStack.length" @click="undo">Undo</button><button @click="controller?.fit()">Fit map</button><button @click="toggleExpanded">{{ expanded ? 'Exit expanded view' : 'Expand workspace' }}</button><button v-if="layout.background" @click="toggleTracing">{{ tracing ? 'Standard view' : 'Trace aerial' }}</button><label class="file-button">Background<input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadBackground" /></label></div>
       </div>
       <div class="editor-workspace">
         <div class="map-panel"><div ref="mapElement" class="parking-map"></div><div class="map-hint">Drag objects to position them · Scroll to zoom · Drag the canvas to pan</div></div>
@@ -71,6 +71,7 @@ const layout = ref(null), cameras = ref([]), states = ref({}), selectedId = ref(
 const mapElement = ref(null), message = ref(''), isError = ref(false), busy = ref(false), loadFailed = ref(false);
 const baseline = ref(''), undoStack = ref([]), viewKey = ref(''), backendUrl = ref(window.location.origin);
 const copiedObject = ref(null), repeatCount = ref(5), repeatGap = ref(10);
+const expanded = ref(false), tracing = ref(true);
 const row = ref({count:10,gap:4,width:24,height:48,direction:'right',x:100,y:100,angle:0,prefix:'P',start:1});
 const route = useRoute(), groups = ref([]), selectedLot = ref(''), lotsLoading = ref(true);
 const lotOptions = computed(() => [...groups.value.map(g=>({id:`group:${g.id}`,name:`${g.name} · parking lot`})),...cameras.value.map(c=>({id:`camera:${c.id}`,name:`${c.name} · single camera`})),{id:'overview',name:'All cameras · existing combined layout'}]);
@@ -87,6 +88,8 @@ const dirty = computed(() => layout.value && JSON.stringify(layout.value) !== ba
 const linkedCount = computed(() => layout.value?.items.filter(i => i.kind === 'stall' && i.space_id).length || 0);
 const linkOptions = computed(() => lotCameras.value.flatMap(c => c.spaces.map(s => ({...s,camera_name:c.name}))));
 const embedCode = computed(() => `<iframe src="${backendUrl.value.replace(/\/$/,'')}/api/parking-layout/embed/${viewKey.value}" title="Parking availability" width="100%" height="650" style="border:0" loading="lazy"></iframe>`);
+async function toggleExpanded() { expanded.value = !expanded.value; await nextTick(); controller?.map.invalidateSize(); }
+function toggleTracing() { tracing.value = !tracing.value; controller?.setTracing(tracing.value); }
 function notify(text, error = false) { message.value = text; isError.value = error; }
 function errorText(e) { const detail = e.response?.data?.detail; return typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map(d => d.msg).join('; ') : e.message || 'Operation failed'; }
 function checkpoint() { undoStack.value.push(JSON.stringify(layout.value)); if (undoStack.value.length > 40) undoStack.value.shift(); }
@@ -155,6 +158,7 @@ function buildRow() {
 }
 function remove() { if (!selected.value || selected.value.locked) return; checkpoint();layout.value.items = layout.value.items.filter(i=>i.id!==selectedId.value);selectedId.value=null; }
 function keyboard(event) {
+  if (event.key === 'Escape' && expanded.value) { event.preventDefault(); toggleExpanded(); return; }
   if (!layout.value || busy.value || event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])') || event.isComposing) return;
   const command = event.ctrlKey || event.metaKey, key = event.key.toLowerCase();
   if (command && !event.altKey) {
@@ -240,6 +244,7 @@ async function loadLot(choice) {
     baseline.value=data.layout?JSON.stringify(layout.value):'';
     await nextTick();if(disposed)return;
     controller=createParkingMap(L,mapElement.value,layout.value,states.value,{select,move(item,x,y){if(item.locked)return;checkpoint();item.x=Math.min(layout.value.width,Math.round(x/10)*10);item.y=Math.min(layout.value.height,Math.round(y/10)*10);}});
+    controller.setTracing?.(tracing.value);
     observer=new ResizeObserver(()=>controller?.map.invalidateSize());observer.observe(mapElement.value);
   }catch(e){loadFailed.value=true;notify(errorText(e),true);}finally{busy.value=false;}
 }
@@ -264,5 +269,6 @@ onUnmounted(()=>{disposed=true;clearInterval(timer);observer?.disconnect();contr
 <style scoped>
 .lot-selector{display:flex;align-items:center;gap:16px;font-size:14px;font-weight:700;margin:16px 0 8px}.lot-selector select{padding:10px 14px;min-width:240px;max-width:100%;border:1px solid #b9b09b;background:#f5efe1;color:#39372b;font:inherit}
 .layout-editor{padding:28px;max-width:1800px;margin:auto;color:#263d31}.editor-heading{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:24px;flex-wrap:wrap}.eyebrow{font-size:10px;letter-spacing:2px;color:#718474;font-weight:700}.editor-heading h1{font-size:30px;letter-spacing:-1px;margin:4px 0}.editor-heading p{font-size:14px;color:#758276}.heading-actions{display:flex;align-items:center;gap:18px}.heading-actions a{font-size:13px;color:#3c6d55}.layout-editor button,.file-button{border:1px solid #d5ded5;background:#fff;border-radius:8px;padding:9px 13px;font:inherit;font-size:12px;color:#385143;cursor:pointer;display:inline-block}.layout-editor button:hover,.file-button:hover{background:#edf3eb}.layout-editor button:disabled{opacity:.45;cursor:default}.layout-editor button.primary{background:#255a41;color:#fff;border-color:#255a41}.editor-toolbar{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px;background:#fff;border:1px solid #dce3d9;border-radius:12px 12px 0 0}.editor-toolbar>div{display:flex;gap:7px;flex-wrap:wrap}.editor-workspace{display:grid;grid-template-columns:minmax(0,1fr) 290px;border:1px solid #dce3d9;border-top:0;border-radius:0 0 12px 12px;overflow:hidden}.map-panel{height:650px;position:relative;min-width:0}.map-panel .parking-map{height:100%;min-height:0}.map-hint{position:absolute;bottom:16px;left:16px;z-index:500;background:#fffffff0;padding:9px 12px;border-radius:7px;color:#657765;font-size:11px;pointer-events:none}.editor-inspector{background:#fff;padding:18px;border-left:1px solid #dce3d9;height:650px;overflow-y:auto}.inspector-tabs{display:flex;gap:5px;margin-bottom:20px}.inspector-tabs button{flex:1;padding:8px;font-size:11px}.layout-editor .active{background:#e1eddf;border-color:#9abd9b}.editor-inspector h2{font-size:17px;text-transform:capitalize;margin-bottom:18px}.editor-inspector h3{font-size:13px;margin-bottom:12px}.editor-inspector h3 span{float:right;color:#839185}.editor-inspector label{display:block;font-size:11px;color:#728171;margin:12px 0}.editor-inspector input,.editor-inspector select,.editor-inspector textarea{display:block;margin-top:5px;width:100%;padding:9px;border:1px solid #d8e0d6;border-radius:7px;color:#304936;font:inherit;font-size:12px;background:#fafcf8}.editor-inspector textarea{resize:vertical;font-size:10px}.input-pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}.input-pair label{min-width:0}.inspector-actions{display:flex;gap:8px;margin-top:18px}.layout-editor button.danger{color:#a64432}.helper{font-size:11px;line-height:1.6;color:#7d897b;margin:12px 0}.editor-inspector hr{border:0;border-top:1px solid #e6ebe2;margin:22px 0}.selection-empty{padding:24px 4px}.selection-empty>span{font-size:30px;color:#a7b8a1}.selection-empty h2{margin:8px 0}.selection-empty p{font-size:12px;color:#7b8a76;line-height:1.6}.object-list{display:flex;flex-direction:column;gap:4px;max-height:250px;overflow:auto}.object-list button{text-align:left;border-color:transparent;flex-shrink:0}.object-list button span{margin-right:10px;color:#7c9074}.file-button input{display:none}.export-buttons{display:flex;flex-direction:column;gap:8px}.full-width{width:100%}.editor-message{padding:12px 16px;background:#e5f2e3;border-radius:8px;margin-bottom:15px;font-size:13px}.editor-message.error{background:#f8e6df;color:#9c4433}.editor-footer{display:flex;justify-content:space-between;gap:10px;font-size:11px;color:#7c8a77;margin-top:14px;flex-wrap:wrap}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 5px 0 12px}.dot:first-child{margin-left:0}.dot.free{background:#70ad84}.dot.busy{background:#d18c78}.dot.unknown{background:#a4afb1}.editor-loading{padding:80px;text-align:center;color:#7c8a77}
-@media(max-width:900px){.layout-editor{padding:16px}.editor-workspace{grid-template-columns:1fr}.editor-inspector{height:auto;max-height:600px;border-left:0;border-top:1px solid #dce3d9}.map-panel{height:480px}.editor-heading h1{font-size:25px}.map-hint{font-size:9px;right:12px}}
+.layout-editor.expanded{position:fixed;inset:0;z-index:2000;max-width:none;overflow:auto;background:#f5f3ed;padding:12px;display:flex;flex-direction:column}.expanded .editor-heading,.expanded .lot-selector,.expanded>.helper{display:none}.expanded .editor-workspace{flex:1;min-height:0}.expanded .map-panel,.expanded .editor-inspector{height:100%;min-height:0}.expanded .editor-toolbar{flex-shrink:0}.expanded .editor-message{margin-bottom:6px}.expanded .editor-footer{padding:8px}.expanded .editor-inspector{max-height:none}
+@media(max-width:900px){.layout-editor{padding:16px}.editor-workspace{grid-template-columns:1fr}.expanded .editor-workspace{grid-template-columns:minmax(0,1fr) 240px}.editor-inspector{height:auto;max-height:600px;border-left:0;border-top:1px solid #dce3d9}.map-panel{height:480px}.editor-heading h1{font-size:25px}.map-hint{font-size:9px;right:12px}}
 </style>
