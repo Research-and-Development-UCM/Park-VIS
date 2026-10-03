@@ -40,7 +40,7 @@ class ParkingLayout(BaseModel):
     width: int = Field(default=1200, ge=200, le=100000)
     height: int = Field(default=800, ge=200, le=100000)
     background: str = Field(default="", max_length=21_000_000)
-    items: list[LayoutItem] = Field(default_factory=list, max_length=1000)
+    items: list[LayoutItem] = Field(default_factory=list, max_length=10000)
 
     @model_validator(mode="after")
     def validate_layout(self):

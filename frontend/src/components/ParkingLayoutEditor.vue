@@ -34,7 +34,7 @@
             </template>
             <div v-else class="selection-empty"><span>↖</span><h2>Select an object</h2><p>Click a space, road, or label to change its size, rotation, and live link.</p></div>
             <hr /><section class="space-generator"><h3>Build parking row</h3><p class="helper">Count includes the first space. Gap is the clear distance between slots. Directions follow the slot rotation.</p>
-<div class="input-pair"><label>Space count<input v-model.number="row.count" type="number" min="1" max="1000" /></label><label>Gap<input v-model.number="row.gap" type="number" min="0" max="1000" /></label></div>
+<div class="input-pair"><label>Space count<input v-model.number="row.count" type="number" min="1" max="10000" /></label><label>Gap<input v-model.number="row.gap" type="number" min="0" max="1000" /></label></div>
 <div class="input-pair"><label>Slot width<input v-model.number="row.width" type="number" min="0.25" step="0.25" max="20000" /></label><label>Slot height<input v-model.number="row.height" type="number" min="0.25" step="0.25" max="20000" /></label></div>
 <label>Extend direction<select v-model="row.direction"><option value="right">Right (+ horizontal) →</option><option value="left">Left (− horizontal) ←</option><option value="down">Down (+ vertical) ↓</option><option value="up">Up (− vertical) ↑</option></select></label>
 <div class="input-pair"><label>Start X<input v-model.number="row.x" type="number" min="0" :max="layout.width" /></label><label>Start Y<input v-model.number="row.y" type="number" min="0" :max="layout.height" /></label></div>
@@ -95,7 +95,7 @@ async function toggleExpanded() { expanded.value = !expanded.value; await nextTi
 function toggleDrawing() { drawing.value = !drawing.value; controller?.setDrawing(drawing.value); }
 function transformItem(item, values) { if(item.locked)return; checkpoint(); Object.assign(item,values); }
 function drawSpace(values) {
-  if(layout.value.items.length >= 1000)return notify('A layout can contain up to 1,000 objects.',true);
+  if(layout.value.items.length >= 10000)return notify('A layout can contain up to 10,000 objects.',true);
   checkpoint();const item = {id:crypto.randomUUID(),kind:'stall',name:row.value.prefix+row.value.start++, ...values,angle:0,locked:false,space_id:null};
   layout.value.items.push(item);select(item);
 }
@@ -120,7 +120,7 @@ function change(key, value) { if (!selected.value || (selected.value.locked && [
 function changeNumber(key, event, min, max) { const value = Number(event.target.value); if (!Number.isFinite(value)) return; change(key, Math.max(min,Math.min(max,value))); }
 function resize(key,event) { const value = Number(event.target.value); if (!Number.isFinite(value)) return; const size = Math.round(Math.max(200,Math.min(100000,value))); if (layout.value.items.some(i=>i.locked && i[key === 'width' ? 'x' : 'y'] > size)) return notify('Unlock items outside the new canvas before shrinking it.',true); checkpoint(); layout.value[key] = size; for (const item of layout.value.items) { item.x = Math.min(item.x,layout.value.width); item.y = Math.min(item.y,layout.value.height); } nextTick(() => controller?.fit()); }
 function add(kind) {
-  if (layout.value.items.length >= 1000) return notify('A layout can contain up to 1,000 objects.',true);
+  if (layout.value.items.length >= 10000) return notify('A layout can contain up to 10,000 objects.',true);
   checkpoint();
   const sizes = {stall:[82,120],road:[400,60],label:[220,35],entry:[90,90]};
   const names = {stall:'New space',road:'Drive aisle',label:'Lot label',entry:'Entrance'};
@@ -132,7 +132,7 @@ function copyObject() { if (selectedItems.value.length !== 1 || !selected.value)
 function insertCopy(source, x, y) { const item = {...source,id:crypto.randomUUID(),x,y,space_id:null,locked:false}; layout.value.items.push(item); return item; }
 function pasteObject() {
   if (!copiedObject.value || !layout.value) return;
-  if (layout.value.items.length >= 1000) return notify('A layout can contain up to 1,000 objects.',true);
+  if (layout.value.items.length >= 10000) return notify('A layout can contain up to 10,000 objects.',true);
   checkpoint(); const source = copiedObject.value;
   const item = insertCopy(source,Math.min(layout.value.width,source.x+20),Math.min(layout.value.height,source.y+20));
   copiedObject.value = {...item}; select(item); notify('Copy pasted. Link it to a camera space when ready.');
@@ -147,7 +147,8 @@ function repeatObjects(axis) {
   const dx = axis === 'x' ? Math.cos(radians)*spacing : -Math.sin(radians)*spacing;
   const dy = axis === 'x' ? Math.sin(radians)*spacing : Math.cos(radians)*spacing;
   const positions = Array.from({length:count},(_,i)=>({x:source.x+dx*(i+1),y:source.y+dy*(i+1)}));
-  if (layout.value.items.length+count > 1000 || positions.some(p=>p.x<0||p.y<0||p.x>layout.value.width||p.y>layout.value.height)) return notify('The copies do not fit. Reduce the count or gap, or enlarge the canvas.',true);
+  if (layout.value.items.length+count > 10000) return notify('A layout can contain up to 10,000 objects.',true);
+  if (positions.some(p=>p.x<0||p.y<0||p.x>layout.value.width||p.y>layout.value.height)) return notify('The copies do not fit. Reduce the count or gap, or enlarge the canvas.',true);
   checkpoint(); let last;
   for (const p of positions) last = insertCopy(source,Math.round(p.x),Math.round(p.y));
   select(last); notify(`${count} unlinked copies added. Undo removes the entire group.`);
@@ -158,10 +159,10 @@ function useSelectedForRow() {
 }
 function buildRow() {
   const r = row.value;
-  if (!Number.isInteger(r.count) || r.count < 1 || r.count > 1000 || !Number.isInteger(r.start) || r.start < 1 || r.start > 1000000 ||
+  if (!Number.isInteger(r.count) || r.count < 1 || r.count > 10000 || !Number.isInteger(r.start) || r.start < 1 || r.start > 1000000 ||
       !['x','y','width','height','angle','gap'].every(k=>Number.isFinite(r[k])) || r.width < 0.25 || r.width > 20000 || r.height < 0.25 || r.height > 20000 || r.gap < 0 || r.gap > 1000 || Math.abs(r.angle) > 360)
     return notify('Enter valid count, dimensions, gap, position, rotation, and starting number.',true);
-  if (layout.value.items.length + r.count > 1000) return notify('A layout can contain up to 1,000 objects.',true);
+  if (layout.value.items.length + r.count > 10000) return notify('A layout can contain up to 10,000 objects.',true);
   const horizontal = ['left','right'].includes(r.direction), sign = ['left','up'].includes(r.direction) ? -1 : 1;
   const radians = r.angle * Math.PI / 180, spacing = (horizontal ? r.width : r.height) + r.gap;
   const dx = sign * spacing * (horizontal ? Math.cos(radians) : -Math.sin(radians));
@@ -246,7 +247,7 @@ async function importJson(event){
   try{
     if(file.size>22_000_000)throw new Error('Layout file is too large.');
     const value=JSON.parse(await file.text());
-    if(value.version!==1||typeof value.name!=='string'||!value.name.trim()||value.name.length>80||!Number.isInteger(value.width)||!Number.isInteger(value.height)||value.width<200||value.width>100000||value.height<200||value.height>100000||!Array.isArray(value.items)||value.items.length>1000||typeof value.background!=='string')throw new Error('Invalid parking layout file.');
+    if(value.version!==1||typeof value.name!=='string'||!value.name.trim()||value.name.length>80||!Number.isInteger(value.width)||!Number.isInteger(value.height)||value.width<200||value.width>100000||value.height<200||value.height>100000||!Array.isArray(value.items)||value.items.length>10000||typeof value.background!=='string')throw new Error('Invalid parking layout file.');
     if(value.background && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value.background)||value.background.length>21_000_000))throw new Error('Invalid background image.');
     const ids=new Set(),links=new Set();
     for(const item of value.items){
