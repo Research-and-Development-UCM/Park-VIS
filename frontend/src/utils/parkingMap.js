@@ -39,7 +39,7 @@ export function statesFromCameras(cameras) {
 // This function is also included in the standalone HTML export.
 export function createParkingMap(L, element, initialLayout, initialStates = {}, callbacks = {}) {
   const map = L.map(element, { crs: L.CRS.Simple, minZoom: -12, maxZoom: 5, attributionControl: false, boxZoom: !callbacks.move, keyboard: !callbacks.move });
-  let layout = initialLayout, states = initialStates, selected = [], tracing = false, drawing = false, editing = false, backgroundVisible = true;
+  let layout = initialLayout, states = initialStates, selected = new Set(), tracing = false, drawing = false, editing = false, backgroundVisible = true, selecting = false, selectionEndedAt = 0;
   const layers = L.layerGroup().addTo(map);
   const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function status(item) {
@@ -55,7 +55,7 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
     const width = item.width * scale, height = item.height * scale;
     const state = status(item);
     const car = '<svg viewBox="0 0 32 56" aria-hidden="true"><rect x="3" y="2" width="26" height="52" rx="8" fill="currentColor"/><path d="M7 15h18l-2-7H9zM7 39h18l-2 9H9z" fill="#fff" opacity=".6"/></svg>';
-    const html = `<div class="parking-object ${item.kind} ${state} ${selected.includes(item.id) ? 'selected' : ''} ${tracing && backgroundVisible && layout.background ? 'tracing' : ''}" style="width:${width}px;height:${height}px;transform:rotate(${item.angle}deg);font-size:${Math.max(7,Math.min(12 * scale,width/4,height/3))}px" role="button" aria-label="${escape(item.name)}${item.kind === 'stall' ? ': ' + state : ''}"><span class="object-name">${escape(item.name)}</span>${item.kind === 'stall' ? (state === 'occupied' ? car : `<b class="parking-symbol">${state === 'unknown' ? '?' : 'P'}</b>`) + `<small>${state === 'unknown' ? 'No recent data' : state}</small>` : item.kind === 'entry' ? '<b class="entry-arrow">↑</b>' : ''}</div>`;
+    const html = `<div class="parking-object ${item.kind} ${state} ${selected.has(item.id) ? 'selected' : ''} ${tracing && backgroundVisible && layout.background ? 'tracing' : ''}" style="width:${width}px;height:${height}px;transform:rotate(${item.angle}deg);font-size:${Math.max(7,Math.min(12 * scale,width/4,height/3))}px" role="button" aria-label="${escape(item.name)}${item.kind === 'stall' ? ': ' + state : ''}"><span class="object-name">${escape(item.name)}</span>${item.kind === 'stall' ? (state === 'occupied' ? car : `<b class="parking-symbol">${state === 'unknown' ? '?' : 'P'}</b>`) + `<small>${state === 'unknown' ? 'No recent data' : state}</small>` : item.kind === 'entry' ? '<b class="entry-arrow">↑</b>' : ''}</div>`;
     return L.divIcon({ className: 'parking-object-anchor', html, iconSize: [width,height], iconAnchor: [width/2,height/2] });
   }
   function render() {
@@ -64,11 +64,12 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
     if (layout.background && backgroundVisible) L.imageOverlay(layout.background, [[0,0],[layout.height,layout.width]], {opacity:tracing ? 1 : .65}).addTo(layers);
     for (const item of layout.items) {
       const marker = L.marker([layout.height - item.y, item.x], {
-        icon: icon(item), draggable: Boolean(callbacks.move) && !item.locked && !drawing, keyboard: true,
+        icon: icon(item), draggable: Boolean(callbacks.move) && !item.locked && !drawing && !selecting, bubblingMouseEvents:true, keyboard: true,
         title: item.name, zIndexOffset: item.kind === 'road' ? -10000 : 1000,
       }).addTo(layers);
       marker.on('dragstart', () => { editing = true; });
       marker.on('click', event => {
+        if(selecting || Date.now()-selectionEndedAt<250)return;
         if (callbacks.select) callbacks.select(item,event);
         else marker.bindPopup(`${escape(item.name)}${item.kind === 'stall' ? ': ' + status(item) : ''}`).openPopup();
       });
@@ -79,7 +80,7 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
         callbacks.move?.(item, Math.max(0,Math.min(layout.width,pos.lng)), Math.max(0,Math.min(layout.height,layout.height-pos.lat)));
         render();
       });
-      if (selected.length === 1 && selected.includes(item.id) && !item.locked && !drawing && callbacks.transform) addHandles(item, marker);
+      if (selected.size === 1 && selected.has(item.id) && !item.locked && !drawing && !selecting && callbacks.transform) addHandles(item, marker);
     }
   }
 
@@ -114,7 +115,7 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
       handle.on('dragend',()=>{editing=false;callbacks.transform(item,{width:draft.width,height:draft.height,angle:draft.angle});render();});
     }
   }
-  let drawStart=null,drawPreview=null;
+  let drawStart=null,drawPreview=null, drawExtend=false;
   const canvasPoint = latlng => ({x:Math.max(0,Math.min(layout.width,latlng.lng)),y:Math.max(0,Math.min(layout.height,layout.height-latlng.lat))});
   function drawMove(event) {
     if(!drawStart)return;
@@ -127,14 +128,15 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
   }
   function drawEnd(event) {
     if(!drawStart)return;
-    const start=drawStart,end=canvasPoint(map.mouseEventToLatLng(event));cancelDraw();
+    const start=drawStart,end=canvasPoint(map.mouseEventToLatLng(event)),wasSelecting=selecting,extend=drawExtend;cancelDraw();
+    if(wasSelecting){selectionEndedAt=Date.now();callbacks.selectBox?.({left:Math.min(start.x,end.x),right:Math.max(start.x,end.x),top:Math.min(start.y,end.y),bottom:Math.max(start.y,end.y)},extend);render();return;}
     const width=Math.abs(end.x-start.x),height=Math.abs(end.y-start.y);
     if(width>=0.25&&height>=0.25&&width<=20000&&height<=20000)callbacks.draw?.({x:(start.x+end.x)/2,y:(start.y+end.y)/2,width,height});
     render();
   }
   map.on('mousedown',event=>{
-    if(!drawing || event.originalEvent.button!==0 || event.originalEvent.target.closest('.leaflet-marker-icon,.leaflet-control'))return;
-    drawStart=canvasPoint(event.latlng);editing=true;
+    if((!drawing&&!selecting) || event.originalEvent.button!==0 || event.originalEvent.target.closest('.leaflet-control') || (!selecting && event.originalEvent.target.closest('.leaflet-marker-icon')))return;
+    drawStart=canvasPoint(event.latlng);drawExtend=Boolean(event.originalEvent.shiftKey);editing=true;
     drawPreview=L.rectangle([event.latlng,event.latlng],{color:'#ffe66b',weight:2,fillOpacity:.08,interactive:false}).addTo(map);
     document.addEventListener('mousemove',drawMove);document.addEventListener('mouseup',drawEnd);
     event.originalEvent.preventDefault();
@@ -144,8 +146,8 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
   function fit() { map.invalidateSize(); map.fitBounds([[0,0],[layout.height,layout.width]], {padding:[30,30]}); }
   fit(); render();
   return {
-    map, fit, setBackgroundVisible(value) { backgroundVisible = Boolean(value); render(); }, setTracing(value) { tracing = Boolean(value); render(); }, setDrawing(value) { cancelDraw();drawing=Boolean(value)&&Boolean(callbacks.draw);if(drawing)map.dragging.disable();else map.dragging.enable();element.classList.toggle('drawing-spaces',drawing);render(); }, destroy: () => {cancelDraw();map.remove();}, status,
-    update(nextLayout, nextStates = states, selectedId = null) { layout = nextLayout; states = nextStates; selected = Array.isArray(selectedId) ? selectedId : selectedId ? [selectedId] : []; render(); },
+    map, fit, setSelecting(value) { cancelDraw();selecting=Boolean(value)&&Boolean(callbacks.selectBox);if(selecting)map.dragging.disable();else if(!drawing)map.dragging.enable();element.classList.toggle('drawing-spaces',selecting||drawing);render(); }, setBackgroundVisible(value) { backgroundVisible = Boolean(value); render(); }, setTracing(value) { tracing = Boolean(value); render(); }, setDrawing(value) { cancelDraw();selecting=false;drawing=Boolean(value)&&Boolean(callbacks.draw);if(drawing)map.dragging.disable();else map.dragging.enable();element.classList.toggle('drawing-spaces',drawing);render(); }, destroy: () => {cancelDraw();map.remove();}, status,
+    update(nextLayout, nextStates = states, selectedId = null) { layout = nextLayout; states = nextStates; selected = new Set(Array.isArray(selectedId) ? selectedId : selectedId ? [selectedId] : []); render(); },
   };
 }
 

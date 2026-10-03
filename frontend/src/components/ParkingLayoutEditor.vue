@@ -10,8 +10,8 @@
     <div v-if="!layout" class="editor-loading">{{ lotsLoading || busy ? 'Loading your spaces…' : loadFailed ? 'Layout could not load. Select the lot to try again.' : 'Choose a parking lot above to start arranging its spaces.' }}</div>
     <template v-else>
       <div class="editor-toolbar">
-        <div><button @click="add('stall')">+ Space</button><button :class="{active:drawing}" @click="toggleDrawing">{{ drawing ? 'Finish drawing' : 'Draw spaces' }}</button><button @click="add('road')">+ Road</button><button @click="add('label')">+ Label</button><button @click="add('entry')">+ Entrance</button></div>
-        <div><button :disabled="selectedItems.length !== 1" @click="copyObject">Copy</button><button :disabled="!copiedObject" @click="pasteObject">Paste</button><button :disabled="selectedItems.length !== 1" @click="duplicate">Duplicate</button><button :disabled="!undoStack.length" @click="undo">Undo</button><button @click="controller?.fit()">Fit map</button><button @click="toggleExpanded">{{ expanded ? 'Exit expanded view' : 'Expand workspace' }}</button><button v-if="layout.background" :aria-pressed="!backgroundVisible" @click="toggleBackground">{{ backgroundVisible ? 'Hide background' : 'Show background' }}</button><button v-if="layout.background" @click="toggleTracing">{{ tracing ? 'Standard view' : 'Trace aerial' }}</button><label class="file-button">Background<input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadBackground" /></label></div>
+        <div><button :class="{active:selecting}" @click="toggleSelecting">{{ selecting ? 'Cancel select' : 'Select' }}</button><button :disabled="!layout.items.length" @click="selectAll">Select all</button><button @click="add('stall')">+ Space</button><button :class="{active:drawing}" @click="toggleDrawing">{{ selecting ? 'Drag a rectangle around spots · Shift adds to the selection' : drawing ? 'Finish drawing' : 'Draw spaces' }}</button><button @click="add('road')">+ Road</button><button @click="add('label')">+ Label</button><button @click="add('entry')">+ Entrance</button></div>
+        <div><button :disabled="!selectedItems.length" @click="copyObject">Copy</button><button :disabled="!copiedObject" @click="pasteObject">Paste</button><button :disabled="!selectedItems.length" @click="duplicate">Duplicate</button><button :disabled="!undoStack.length" @click="undo">Undo</button><button @click="controller?.fit()">Fit map</button><button @click="toggleExpanded">{{ expanded ? 'Exit expanded view' : 'Expand workspace' }}</button><button v-if="layout.background" :aria-pressed="!backgroundVisible" @click="toggleBackground">{{ backgroundVisible ? 'Hide background' : 'Show background' }}</button><button v-if="layout.background" @click="toggleTracing">{{ tracing ? 'Standard view' : 'Trace aerial' }}</button><label class="file-button">Background<input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadBackground" /></label></div>
       </div>
       <div class="editor-workspace">
         <div class="map-panel"><div ref="mapElement" class="parking-map"></div><div class="map-hint">{{ drawing ? 'Drag across a parking space to draw its box · Escape to finish' : 'Shift-click to select multiple spots · Drag to move · Scroll to zoom' }}</div></div>
@@ -64,7 +64,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { onBeforeRouteLeave, useRoute } from 'vue-router';
 import axios from 'axios';
 import L from 'leaflet';
-import { selectItemIds, groupMovement } from '../utils/parkingSelection.mjs';
+import { selectItemIds, groupMovement, itemsInsideBox, pasteSelection } from '../utils/parkingSelection.mjs';
 import 'leaflet/dist/leaflet.css';
 import { createParkingMap, defaultLayout, statesFromCameras, installParkingStyle, exportViewer, downloadFile } from '../utils/parkingMap';
 
@@ -72,7 +72,7 @@ const layout = ref(null), cameras = ref([]), states = ref({}), selectedId = ref(
 const mapElement = ref(null), message = ref(''), isError = ref(false), busy = ref(false), loadFailed = ref(false);
 const baseline = ref(''), undoStack = ref([]), viewKey = ref(''), backendUrl = ref(window.location.origin);
 const copiedObject = ref(null), repeatCount = ref(5), repeatGap = ref(10);
-const expanded = ref(false), tracing = ref(true), drawing = ref(false), backgroundVisible = ref(true);
+const expanded = ref(false), tracing = ref(true), drawing = ref(false), selecting = ref(false), backgroundVisible = ref(true);
 const row = ref({count:10,gap:4,width:24,height:48,direction:'right',x:100,y:100,angle:0,prefix:'P',start:1});
 const route = useRoute(), groups = ref([]), selectedLot = ref(''), lotsLoading = ref(true);
 const lotOptions = computed(() => [...groups.value.map(g=>({id:`group:${g.id}`,name:`${g.name} · parking lot`})),...cameras.value.map(c=>({id:`camera:${c.id}`,name:`${c.name} · single camera`})),{id:'overview',name:'All cameras · existing combined layout'}]);
@@ -85,14 +85,17 @@ const lotCameras = computed(() => {
 const dashboardLink = computed(()=>({path:'/dashboard',query:selectedLot.value && selectedLot.value !== 'overview' ? {lot:selectedLot.value}: {}}));
 let controller = null, timer = null, refreshInFlight = false, observer = null, disposed = false;
 const selectedIds = ref([]);
-const selectedItems = computed(()=>layout.value?.items.filter(i=>selectedIds.value.includes(i.id)) || []);
+const selectedItems = computed(()=>{const ids=new Set(selectedIds.value);return layout.value?.items.filter(i=>ids.has(i.id)) || [];});
 const selected = computed(() => layout.value?.items.find(i => i.id === selectedId.value));
 const dirty = computed(() => layout.value && JSON.stringify(layout.value) !== baseline.value);
 const linkedCount = computed(() => layout.value?.items.filter(i => i.kind === 'stall' && i.space_id).length || 0);
 const linkOptions = computed(() => lotCameras.value.flatMap(c => c.spaces.map(s => ({...s,camera_name:c.name}))));
 const embedCode = computed(() => `<iframe src="${backendUrl.value.replace(/\/$/,'')}/api/parking-layout/embed/${viewKey.value}" title="Parking availability" width="100%" height="650" style="border:0" loading="lazy"></iframe>`);
 async function toggleExpanded() { expanded.value = !expanded.value; await nextTick(); controller?.map.invalidateSize(); }
-function toggleDrawing() { drawing.value = !drawing.value; controller?.setDrawing(drawing.value); }
+function toggleDrawing() { selecting.value=false;controller?.setSelecting(false);drawing.value = !drawing.value; controller?.setDrawing(drawing.value); }
+function toggleSelecting() { drawing.value=false;controller?.setDrawing(false);selecting.value=!selecting.value;controller?.setSelecting(selecting.value); }
+function selectAll() { selectedIds.value=layout.value.items.map(i=>i.id);selectedId.value=selectedIds.value.at(-1)||null;tab.value='object'; }
+function selectBox(bounds,extend) { const ids=itemsInsideBox(layout.value.items,bounds).map(i=>i.id);selectedIds.value=extend ? [...new Set([...selectedIds.value,...ids])] : ids;selectedId.value=selectedIds.value.at(-1)||null;tab.value='object';selecting.value=false;controller?.setSelecting(false); }
 function transformItem(item, values) { if(item.locked)return; checkpoint(); Object.assign(item,values); }
 function drawSpace(values) {
   if(layout.value.items.length >= 10000)return notify('A layout can contain up to 10,000 objects.',true);
@@ -128,16 +131,16 @@ function add(kind) {
   const item = {id:crypto.randomUUID(),kind,name:names[kind],x:layout.value.width/2,y:layout.value.height/2,width,height,angle:0,space_id:null};
   layout.value.items.push(item);select(item);
 }
-function copyObject() { if (selectedItems.value.length !== 1 || !selected.value) return; copiedObject.value = {...selected.value}; notify('Object copied. Paste creates an unlinked copy.'); }
+function copyObject() { if(!selectedItems.value.length)return;copiedObject.value=selectedItems.value.map(item=>({...item}));notify(copiedObject.value.length+' items copied with their names.'); }
 function insertCopy(source, x, y) { const item = {...source,id:crypto.randomUUID(),x,y,space_id:null,locked:false}; layout.value.items.push(item); return item; }
 function pasteObject() {
-  if (!copiedObject.value || !layout.value) return;
-  if (layout.value.items.length >= 10000) return notify('A layout can contain up to 10,000 objects.',true);
-  checkpoint(); const source = copiedObject.value;
-  const item = insertCopy(source,Math.min(layout.value.width,source.x+20),Math.min(layout.value.height,source.y+20));
-  copiedObject.value = {...item}; select(item); notify('Copy pasted. Link it to a camera space when ready.');
+  if(!copiedObject.value?.length || !layout.value)return;
+  if(layout.value.items.length+copiedObject.value.length>10000)return notify('A layout can contain up to 10,000 objects.',true);
+  const items=pasteSelection(copiedObject.value,layout.value.width,layout.value.height);
+  checkpoint();layout.value.items.push(...items);selectedIds.value=items.map(i=>i.id);selectedId.value=selectedIds.value.at(-1)||null;tab.value='object';copiedObject.value=items.map(i=>({...i}));
+  notify(items.length+' items pasted with their original names. Drag the selection to move it.');
 }
-function duplicate() { if (selectedItems.value.length !== 1 || !selected.value) return; copiedObject.value = {...selected.value}; pasteObject(); }
+function duplicate() { copyObject();pasteObject(); }
 function repeatObjects(axis) {
   if (!selected.value) return;
   const count = Number(repeatCount.value), gap = Number(repeatGap.value);
@@ -182,6 +185,7 @@ function remove() {
   checkpoint();layout.value.items=layout.value.items.filter(i=>!ids.has(i.id));selectedIds.value=selectedIds.value.filter(id=>!ids.has(id));selectedId.value=selectedIds.value.at(-1)||null;
 }
 function keyboard(event) {
+  if (event.key === 'Escape' && selecting.value) { event.preventDefault();toggleSelecting();return; }
   if (event.key === 'Escape' && drawing.value) { event.preventDefault(); toggleDrawing(); return; }
   if (event.key === 'Escape' && expanded.value) { event.preventDefault(); toggleExpanded(); return; }
   if (!layout.value || busy.value || event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])') || event.isComposing) return;
@@ -272,14 +276,14 @@ async function loadLot(choice) {
   if (!lotOptions.value.some(l=>l.id===choice)) return;
   busy.value=true;selectedLot.value=choice;loadFailed.value=false;
   controller?.destroy();controller=null;observer?.disconnect();observer=null;
-  layout.value=null;clearSelection();drawing.value=false;backgroundVisible.value=true;undoStack.value=[];copiedObject.value=null;viewKey.value='';message.value='';
+  layout.value=null;clearSelection();drawing.value=false;selecting.value=false;backgroundVisible.value=true;undoStack.value=[];copiedObject.value=null;viewKey.value='';message.value='';
   try {
     const {data}=await axios.get('/api/parking-layout',{params:lotParams()});if(disposed)return;
     layout.value=data.layout||defaultLayout(lotCameras.value);
     if(!data.layout)layout.value.name=lotOptions.value.find(l=>l.id===choice).name.split(' · ')[0];
     baseline.value=data.layout?JSON.stringify(layout.value):'';
     await nextTick();if(disposed)return;
-    controller=createParkingMap(L,mapElement.value,layout.value,states.value,{select,transform:transformItem,draw:drawSpace,move:moveSelection});
+    controller=createParkingMap(L,mapElement.value,layout.value,states.value,{select,selectBox,transform:transformItem,draw:drawSpace,move:moveSelection});
     controller.setTracing?.(tracing.value);
     observer=new ResizeObserver(()=>controller?.map.invalidateSize());observer.observe(mapElement.value);
   }catch(e){loadFailed.value=true;notify(errorText(e),true);}finally{busy.value=false;}

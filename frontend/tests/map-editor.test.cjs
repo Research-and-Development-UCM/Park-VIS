@@ -38,3 +38,8 @@ test('tiny clicks do not create a space, and destroy cancels drawing',()=>{
 test('multiple selections highlight all selected slots without resize handles and forward Shift clicks',()=>{
  const clicks=[];const s=setup(item(),{select:(i,e)=>clicks.push(e),transform(){}});s.layout.items.push({...item(),id:'b',x:120});s.viewer.update(s.layout,{},['a','b']);assert.equal(s.markers.length,2);for(const marker of s.markers)assert.match(marker.options.icon.html,/selected/);const event={originalEvent:{shiftKey:true}};s.markers[1].handlers.click(event);assert.equal(clicks[0],event);
 });
+
+test('Select mode drags a marquee and forwards bounds plus Shift state',()=>{
+ const boxes=[];const s=setup(item(),{selectBox:(bounds,extend)=>boxes.push({bounds,extend})});s.viewer.setSelecting(true);assert.equal(s.markers[0].options.draggable,false);
+ s.events.mousedown({latlng:{lat:49920,lng:80},originalEvent:{button:0,shiftKey:true,target:{closest:()=>null},preventDefault(){}}});s.documentEvents.mouseup({latlng:{lat:49880,lng:120}});assert.deepEqual(boxes[0],{bounds:{left:80,right:120,top:80,bottom:120},extend:true});assert.equal(Object.keys(s.documentEvents).length,0);
+});
