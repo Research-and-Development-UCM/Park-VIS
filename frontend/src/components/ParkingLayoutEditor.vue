@@ -11,14 +11,14 @@
     <template v-else>
       <div class="editor-toolbar">
         <div><button @click="add('stall')">+ Space</button><button :class="{active:drawing}" @click="toggleDrawing">{{ drawing ? 'Finish drawing' : 'Draw spaces' }}</button><button @click="add('road')">+ Road</button><button @click="add('label')">+ Label</button><button @click="add('entry')">+ Entrance</button></div>
-        <div><button :disabled="!selected" @click="copyObject">Copy</button><button :disabled="!copiedObject" @click="pasteObject">Paste</button><button :disabled="!selected" @click="duplicate">Duplicate</button><button :disabled="!undoStack.length" @click="undo">Undo</button><button @click="controller?.fit()">Fit map</button><button @click="toggleExpanded">{{ expanded ? 'Exit expanded view' : 'Expand workspace' }}</button><button v-if="layout.background" :aria-pressed="!backgroundVisible" @click="toggleBackground">{{ backgroundVisible ? 'Hide background' : 'Show background' }}</button><button v-if="layout.background" @click="toggleTracing">{{ tracing ? 'Standard view' : 'Trace aerial' }}</button><label class="file-button">Background<input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadBackground" /></label></div>
+        <div><button :disabled="selectedItems.length !== 1" @click="copyObject">Copy</button><button :disabled="!copiedObject" @click="pasteObject">Paste</button><button :disabled="selectedItems.length !== 1" @click="duplicate">Duplicate</button><button :disabled="!undoStack.length" @click="undo">Undo</button><button @click="controller?.fit()">Fit map</button><button @click="toggleExpanded">{{ expanded ? 'Exit expanded view' : 'Expand workspace' }}</button><button v-if="layout.background" :aria-pressed="!backgroundVisible" @click="toggleBackground">{{ backgroundVisible ? 'Hide background' : 'Show background' }}</button><button v-if="layout.background" @click="toggleTracing">{{ tracing ? 'Standard view' : 'Trace aerial' }}</button><label class="file-button">Background<input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadBackground" /></label></div>
       </div>
       <div class="editor-workspace">
-        <div class="map-panel"><div ref="mapElement" class="parking-map"></div><div class="map-hint">{{ drawing ? 'Drag across a parking space to draw its box · Escape to finish' : 'Drag slots to move · Select a slot for resize and rotation handles · Scroll to zoom' }}</div></div>
+        <div class="map-panel"><div ref="mapElement" class="parking-map"></div><div class="map-hint">{{ drawing ? 'Drag across a parking space to draw its box · Escape to finish' : 'Shift-click to select multiple spots · Drag to move · Scroll to zoom' }}</div></div>
         <aside class="editor-inspector">
           <div class="inspector-tabs"><button :class="{ active: tab === 'object' }" @click="tab = 'object'">Object</button><button :class="{ active: tab === 'layout' }" @click="tab = 'layout'">Layout & export</button></div>
           <template v-if="tab === 'object'">
-            <template v-if="selected">
+            <template v-if="selectedItems.length > 1"><h2>{{ selectedItems.length }} items selected</h2><p class="helper">Shift-click adds or removes items. Drag a selected spot or use arrow keys to move the group. Locked items stay in place.</p><div class="inspector-actions"><button @click="lockSelection(true)">Lock all</button><button @click="lockSelection(false)">Unlock all</button></div><div class="inspector-actions"><button class="danger" @click="remove">Remove unlocked</button><button @click="clearSelection">Clear selection</button></div></template><template v-else-if="selected">
               <button @click="change('locked', !selected.locked)">{{ selected.locked ? 'Unlock item' : 'Lock item' }}</button><p v-if="selected.locked" class="helper">Position, size, rotation, and removal are locked.</p><h2>{{ selected.kind === 'stall' ? 'Parking space' : selected.kind }}</h2>
               <label>Name<input :value="selected.name" maxlength="80" @change="change('name', $event.target.value)" /></label>
               <label v-if="selected.kind === 'stall'">Live camera space<select :value="selected.space_id ?? ''" @change="change('space_id', $event.target.value ? Number($event.target.value) : null)"><option value="">Unlinked · unknown status</option><option v-for="s in linkOptions" :key="s.id" :value="s.id" :disabled="linkedElsewhere(s.id)">{{ s.camera_name }} / {{ s.name }}{{ linkedElsewhere(s.id) ? ' (already linked)' : '' }}</option></select></label>
@@ -40,7 +40,7 @@
 <div class="input-pair"><label>Start X<input v-model.number="row.x" type="number" min="0" :max="layout.width" /></label><label>Start Y<input v-model.number="row.y" type="number" min="0" :max="layout.height" /></label></div>
 <label>Slot rotation · degrees<input v-model.number="row.angle" type="number" min="-360" max="360" /></label><label>Name prefix<input v-model="row.prefix" maxlength="60" /></label><label>Starting number<input v-model.number="row.start" type="number" min="1" max="1000000" /></label>
 <div class="inspector-actions"><button :disabled="!selected" @click="useSelectedForRow">Use selected position & size</button><button @click="buildRow">Add parking row</button></div></section><hr /><h3>Objects <span>{{ layout.items.length }}</span></h3>
-            <div class="object-list"><button v-for="item in layout.items" :key="item.id" :class="{ active: selectedId === item.id }" @click="select(item)"><span>{{ item.kind === 'stall' ? '▣' : item.kind === 'road' ? '━' : item.kind === 'entry' ? '↑' : 'T' }}</span>{{ item.name || 'Untitled' }}</button></div>
+            <div class="object-list"><button v-for="item in layout.items" :key="item.id" :class="{ active: selectedIds.includes(item.id) }" @click="select(item, $event)"><span>{{ item.kind === 'stall' ? '▣' : item.kind === 'road' ? '━' : item.kind === 'entry' ? '↑' : 'T' }}</span>{{ item.name || 'Untitled' }}</button></div>
           </template>
           <template v-else>
             <h2>Your layout</h2><label>Lot name<input v-model="layout.name" maxlength="80" /></label>
@@ -64,6 +64,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { onBeforeRouteLeave, useRoute } from 'vue-router';
 import axios from 'axios';
 import L from 'leaflet';
+import { selectItemIds, groupMovement } from '../utils/parkingSelection.mjs';
 import 'leaflet/dist/leaflet.css';
 import { createParkingMap, defaultLayout, statesFromCameras, installParkingStyle, exportViewer, downloadFile } from '../utils/parkingMap';
 
@@ -83,6 +84,8 @@ const lotCameras = computed(() => {
 });
 const dashboardLink = computed(()=>({path:'/dashboard',query:selectedLot.value && selectedLot.value !== 'overview' ? {lot:selectedLot.value}: {}}));
 let controller = null, timer = null, refreshInFlight = false, observer = null, disposed = false;
+const selectedIds = ref([]);
+const selectedItems = computed(()=>layout.value?.items.filter(i=>selectedIds.value.includes(i.id)) || []);
 const selected = computed(() => layout.value?.items.find(i => i.id === selectedId.value));
 const dirty = computed(() => layout.value && JSON.stringify(layout.value) !== baseline.value);
 const linkedCount = computed(() => layout.value?.items.filter(i => i.kind === 'stall' && i.space_id).length || 0);
@@ -101,8 +104,17 @@ function toggleTracing() { tracing.value = !tracing.value; controller?.setTracin
 function notify(text, error = false) { message.value = text; isError.value = error; }
 function errorText(e) { const detail = e.response?.data?.detail; return typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map(d => d.msg).join('; ') : e.message || 'Operation failed'; }
 function checkpoint() { undoStack.value.push(JSON.stringify(layout.value)); if (undoStack.value.length > 40) undoStack.value.shift(); }
-function undo() { if (undoStack.value.length) { layout.value = JSON.parse(undoStack.value.pop()); if (!selected.value) selectedId.value = null; } }
-function select(item) { selectedId.value = item.id; tab.value = 'object'; }
+function undo() { if (undoStack.value.length) { layout.value = JSON.parse(undoStack.value.pop()); selectedIds.value=selectedIds.value.filter(id=>layout.value.items.some(i=>i.id===id));selectedId.value=selectedIds.value.at(-1)||null; } }
+function select(item, event) { selectedIds.value=selectItemIds(selectedIds.value,item.id,Boolean(event?.shiftKey || event?.originalEvent?.shiftKey));selectedId.value=selectedIds.value.at(-1)||null;tab.value='object'; }
+function clearSelection() { selectedIds.value=[];selectedId.value=null; }
+function lockSelection(locked) { if(!selectedItems.value.length)return;checkpoint();for(const item of selectedItems.value)item.locked=locked; }
+function moveSelection(item,x,y) {
+  if(item.locked)return;
+  if(!selectedIds.value.includes(item.id))select(item);
+  const moves=groupMovement(selectedItems.value,x-item.x,y-item.y,layout.value.width,layout.value.height);
+  if(!moves.some(m=>m.x!==m.item.x || m.y!==m.item.y))return;
+  checkpoint();for(const move of moves){move.item.x=move.x;move.item.y=move.y;}
+}
 function linkedElsewhere(id) { return layout.value.items.some(i => i.id !== selectedId.value && i.space_id === id); }
 function change(key, value) { if (!selected.value || (selected.value.locked && ['x','y','width','height','angle'].includes(key))) return; checkpoint(); selected.value[key] = value; }
 function changeNumber(key, event, min, max) { const value = Number(event.target.value); if (!Number.isFinite(value)) return; change(key, Math.max(min,Math.min(max,value))); }
@@ -116,7 +128,7 @@ function add(kind) {
   const item = {id:crypto.randomUUID(),kind,name:names[kind],x:layout.value.width/2,y:layout.value.height/2,width,height,angle:0,space_id:null};
   layout.value.items.push(item);select(item);
 }
-function copyObject() { if (!selected.value) return; copiedObject.value = {...selected.value}; notify('Object copied. Paste creates an unlinked copy.'); }
+function copyObject() { if (selectedItems.value.length !== 1 || !selected.value) return; copiedObject.value = {...selected.value}; notify('Object copied. Paste creates an unlinked copy.'); }
 function insertCopy(source, x, y) { const item = {...source,id:crypto.randomUUID(),x,y,space_id:null,locked:false}; layout.value.items.push(item); return item; }
 function pasteObject() {
   if (!copiedObject.value || !layout.value) return;
@@ -125,7 +137,7 @@ function pasteObject() {
   const item = insertCopy(source,Math.min(layout.value.width,source.x+20),Math.min(layout.value.height,source.y+20));
   copiedObject.value = {...item}; select(item); notify('Copy pasted. Link it to a camera space when ready.');
 }
-function duplicate() { if (!selected.value) return; copiedObject.value = {...selected.value}; pasteObject(); }
+function duplicate() { if (selectedItems.value.length !== 1 || !selected.value) return; copiedObject.value = {...selected.value}; pasteObject(); }
 function repeatObjects(axis) {
   if (!selected.value) return;
   const count = Number(repeatCount.value), gap = Number(repeatGap.value);
@@ -164,7 +176,10 @@ function buildRow() {
   layout.value.items.push(...items);select(items[0]);row.value.start += r.count;
   notify(r.count+' unlinked parking spaces added. Undo removes the entire row.');
 }
-function remove() { if (!selected.value || selected.value.locked) return; checkpoint();layout.value.items = layout.value.items.filter(i=>i.id!==selectedId.value);selectedId.value=null; }
+function remove() {
+  const ids=new Set(selectedItems.value.filter(i=>!i.locked).map(i=>i.id));if(!ids.size)return;
+  checkpoint();layout.value.items=layout.value.items.filter(i=>!ids.has(i.id));selectedIds.value=selectedIds.value.filter(id=>!ids.has(id));selectedId.value=selectedIds.value.at(-1)||null;
+}
 function keyboard(event) {
   if (event.key === 'Escape' && drawing.value) { event.preventDefault(); toggleDrawing(); return; }
   if (event.key === 'Escape' && expanded.value) { event.preventDefault(); toggleExpanded(); return; }
@@ -176,11 +191,10 @@ function keyboard(event) {
   }
   if (!selected.value) return;
   if (event.key === 'Delete' || event.key === 'Backspace') {event.preventDefault();remove();return;}
-  if (event.key === 'Escape') {selectedId.value=null;return;}
-  if (selected.value.locked) return;
+  if (event.key === 'Escape') {clearSelection();return;}
   const direction = {ArrowLeft:['x',-1],ArrowRight:['x',1],ArrowUp:['y',-1],ArrowDown:['y',1]}[event.key];
   if (!direction) return;
-  event.preventDefault();const [axis,sign] = direction, step = event.shiftKey ? 10 : 1;
+  event.preventDefault();if(selectedItems.value.length>1){if(event.altKey)return;const [axis,sign]=direction;const step=event.shiftKey?10:1;const moves=groupMovement(selectedItems.value,axis==='x'?sign*step:0,axis==='y'?sign*step:0,layout.value.width,layout.value.height);if(moves.some(m=>m.x!==m.item.x||m.y!==m.item.y)){if(!event.repeat)checkpoint();for(const move of moves){move.item.x=move.x;move.item.y=move.y;}}return;}if(selected.value.locked)return;const [axis,sign] = direction, step = event.shiftKey ? 10 : 1;
   const property = event.altKey ? axis === 'x' ? 'width' : 'height' : axis;
   const min = event.altKey ? 0.25 : 0, max = event.altKey ? 20000 : axis === 'x' ? layout.value.width : layout.value.height;
   const value = Math.max(min,Math.min(max,selected.value[property]+sign*step));
@@ -242,10 +256,10 @@ async function importJson(event){
       if(item.space_id!==null&&(!Number.isInteger(item.space_id)||item.space_id<1||item.kind!=='stall'||links.has(item.space_id)))throw new Error('Invalid or duplicate camera-space link.');
       if(item.space_id)links.add(item.space_id);
     }
-    checkpoint();layout.value=value;selectedId.value=null;await nextTick();controller?.fit();notify('Layout imported. Check camera-space links, then save.');
+    checkpoint();layout.value=value;clearSelection();await nextTick();controller?.fit();notify('Layout imported. Check camera-space links, then save.');
   }catch(e){notify(e.message || 'Unable to import layout.',true);}
 }
-watch([layout,states,selectedId],()=>controller?.update(layout.value,states.value,selectedId.value),{deep:true});
+watch([layout,states,selectedIds],()=>controller?.update(layout.value,states.value,selectedIds.value),{deep:true});
 function beforeUnload(e){if(dirty.value){e.preventDefault();e.returnValue='';}}
 onBeforeRouteLeave(()=>!dirty.value||window.confirm('Leave without saving your layout changes?'));
 async function chooseLot(event) {
@@ -257,14 +271,14 @@ async function loadLot(choice) {
   if (!lotOptions.value.some(l=>l.id===choice)) return;
   busy.value=true;selectedLot.value=choice;loadFailed.value=false;
   controller?.destroy();controller=null;observer?.disconnect();observer=null;
-  layout.value=null;selectedId.value=null;drawing.value=false;backgroundVisible.value=true;undoStack.value=[];copiedObject.value=null;viewKey.value='';message.value='';
+  layout.value=null;clearSelection();drawing.value=false;backgroundVisible.value=true;undoStack.value=[];copiedObject.value=null;viewKey.value='';message.value='';
   try {
     const {data}=await axios.get('/api/parking-layout',{params:lotParams()});if(disposed)return;
     layout.value=data.layout||defaultLayout(lotCameras.value);
     if(!data.layout)layout.value.name=lotOptions.value.find(l=>l.id===choice).name.split(' · ')[0];
     baseline.value=data.layout?JSON.stringify(layout.value):'';
     await nextTick();if(disposed)return;
-    controller=createParkingMap(L,mapElement.value,layout.value,states.value,{select,transform:transformItem,draw:drawSpace,move(item,x,y){if(item.locked)return;checkpoint();item.x=Math.min(layout.value.width,Math.round(x*100)/100);item.y=Math.min(layout.value.height,Math.round(y*100)/100);}});
+    controller=createParkingMap(L,mapElement.value,layout.value,states.value,{select,transform:transformItem,draw:drawSpace,move:moveSelection});
     controller.setTracing?.(tracing.value);
     observer=new ResizeObserver(()=>controller?.map.invalidateSize());observer.observe(mapElement.value);
   }catch(e){loadFailed.value=true;notify(errorText(e),true);}finally{busy.value=false;}

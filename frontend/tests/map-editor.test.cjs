@@ -34,3 +34,7 @@ test('tiny clicks do not create a space, and destroy cancels drawing',()=>{
  const draws=[];const s=setup(item(),{draw:v=>draws.push(v)});s.viewer.setDrawing(true);
  const down=()=>s.events.mousedown({latlng:{lat:49900,lng:100},originalEvent:{button:0,target:{closest:()=>null},preventDefault(){}}});down();s.documentEvents.mouseup({latlng:{lat:49900,lng:100}});assert.equal(draws.length,0);down();s.viewer.destroy();assert.equal(Object.keys(s.documentEvents).length,0);
 });
+
+test('multiple selections highlight all selected slots without resize handles and forward Shift clicks',()=>{
+ const clicks=[];const s=setup(item(),{select:(i,e)=>clicks.push(e),transform(){}});s.layout.items.push({...item(),id:'b',x:120});s.viewer.update(s.layout,{},['a','b']);assert.equal(s.markers.length,2);for(const marker of s.markers)assert.match(marker.options.icon.html,/selected/);const event={originalEvent:{shiftKey:true}};s.markers[1].handlers.click(event);assert.equal(clicks[0],event);
+});
