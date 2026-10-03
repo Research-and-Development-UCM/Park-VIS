@@ -1,0 +1,14 @@
+.git
+.dev-env
+.tools
+.local-data
+frontend/node_modules
+frontend/dist
+__pycache__
+*.pyc
+.env
+uploads
+training_feedback
+model_cache
+*.log
+*.db

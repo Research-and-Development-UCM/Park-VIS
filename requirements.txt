@@ -1,0 +1,38 @@
+fastapi==0.129.0
+uvicorn>=0.40.0
+websockets>=12.0
+sqlalchemy==2.0.46
+pydantic==2.12.5
+pyjwt==2.7.0
+requests==2.31.0
+passlib==1.7.4
+bcrypt==3.2.2
+cryptography>=42.0.0
+paho-mqtt>=2.0
+# NOTE: we deliberately do NOT install the Python onnxruntime package
+# here. The vulturevision C++ engine bundles its own libonnxruntime.so
+# (and the CUDA / DirectML provider plugins) and does all inference
+# in C++. The Python onnxruntime package used to be required only for
+# `ort.get_available_providers()` in backend/inference.py to drive the
+# Settings UI's "Inference Device" dropdown — that call has been
+# replaced with vulturevision._vulturevision.get_available_gpu_provider()
+# (a C++ probe), so the Python package is no longer needed. Skipping
+# it saves ~300 MB on the Docker image.
+pillow==10.4.0
+numpy==2.3.5
+python-multipart==0.0.22
+yt-dlp
+PyGObject; sys_platform != 'win32'
+opencv-python-headless
+# rollinglmdb is vendored at rollinglmdb/ in the repo root
+lmdb
+loguru
+pympler
+psutil
+python-dotenv
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-instrumentation-fastapi
+opentelemetry-instrumentation-sqlalchemy
+opentelemetry-exporter-otlp
+opentelemetry-exporter-otlp-proto-grpc

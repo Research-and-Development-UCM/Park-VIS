@@ -1,0 +1,13 @@
+services:
+  park-vis:
+    build: .
+    image: park-vis:local
+    ports:
+      - "8000:8000"
+    volumes:
+      - park-vis-data:/var/lib/park-vis
+    environment:
+      PARK_VIS_HOME: /var/lib/park-vis
+    restart: unless-stopped
+volumes:
+  park-vis-data:
