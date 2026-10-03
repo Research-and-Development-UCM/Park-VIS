@@ -1,4 +1,4 @@
-param([int]$Port = 5175, [int]$BackendPort = 8002)
+param([int]$Port = 5173, [int]$BackendPort = 8001)
 $ErrorActionPreference = 'Stop'
 $env:PATH = "$PSScriptRoot/.dev-env;$PSScriptRoot/.dev-env/Scripts;$env:PATH"
 $node = Get-Command node.exe -ErrorAction SilentlyContinue

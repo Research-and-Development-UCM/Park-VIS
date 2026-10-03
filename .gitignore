@@ -21,3 +21,7 @@ training_feedback/
 .test_lv_home/
 .DS_Store
 Thumbs.db
+.migration-backup/
+!models/parking-occupancy.encs
+!fixtures/parkinglot.db
+!fixtures/media/

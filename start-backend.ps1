@@ -1,4 +1,4 @@
-param([int]$Port = 8002)
+param([int]$Port = 8001)
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 if (-not (Test-Path '.dev-env/python.exe')) { throw 'Run setup.ps1 first.' }
