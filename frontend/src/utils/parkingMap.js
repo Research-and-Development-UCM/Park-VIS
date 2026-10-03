@@ -38,8 +38,8 @@ export function statesFromCameras(cameras) {
 
 // This function is also included in the standalone HTML export.
 export function createParkingMap(L, element, initialLayout, initialStates = {}, callbacks = {}) {
-  const map = L.map(element, { crs: L.CRS.Simple, minZoom: -5, maxZoom: 5, attributionControl: false, keyboard: !callbacks.move });
-  let layout = initialLayout, states = initialStates, selected = null, tracing = false;
+  const map = L.map(element, { crs: L.CRS.Simple, minZoom: -12, maxZoom: 5, attributionControl: false, keyboard: !callbacks.move });
+  let layout = initialLayout, states = initialStates, selected = null, tracing = false, drawing = false, editing = false;
   const layers = L.layerGroup().addTo(map);
   const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function status(item) {
@@ -55,33 +55,96 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
     const width = item.width * scale, height = item.height * scale;
     const state = status(item);
     const car = '<svg viewBox="0 0 32 56" aria-hidden="true"><rect x="3" y="2" width="26" height="52" rx="8" fill="currentColor"/><path d="M7 15h18l-2-7H9zM7 39h18l-2 9H9z" fill="#fff" opacity=".6"/></svg>';
-    const html = `<div class="parking-object ${item.kind} ${state} ${selected === item.id ? 'selected' : ''} ${tracing ? 'tracing' : ''}" style="width:${width}px;height:${height}px;transform:rotate(${item.angle}deg);font-size:${Math.max(7,12 * scale)}px" role="button" aria-label="${escape(item.name)}${item.kind === 'stall' ? ': ' + state : ''}"><span class="object-name">${escape(item.name)}</span>${item.kind === 'stall' ? (state === 'occupied' ? car : `<b class="parking-symbol">${state === 'unknown' ? '?' : 'P'}</b>`) + `<small>${state === 'unknown' ? 'No recent data' : state}</small>` : item.kind === 'entry' ? '<b class="entry-arrow">↑</b>' : ''}</div>`;
+    const html = `<div class="parking-object ${item.kind} ${state} ${selected === item.id ? 'selected' : ''} ${tracing ? 'tracing' : ''}" style="width:${width}px;height:${height}px;transform:rotate(${item.angle}deg);font-size:${Math.max(7,Math.min(12 * scale,width/4,height/3))}px" role="button" aria-label="${escape(item.name)}${item.kind === 'stall' ? ': ' + state : ''}"><span class="object-name">${escape(item.name)}</span>${item.kind === 'stall' ? (state === 'occupied' ? car : `<b class="parking-symbol">${state === 'unknown' ? '?' : 'P'}</b>`) + `<small>${state === 'unknown' ? 'No recent data' : state}</small>` : item.kind === 'entry' ? '<b class="entry-arrow">↑</b>' : ''}</div>`;
     return L.divIcon({ className: 'parking-object-anchor', html, iconSize: [width,height], iconAnchor: [width/2,height/2] });
   }
   function render() {
+    if (editing) return;
     layers.clearLayers();
     if (layout.background) L.imageOverlay(layout.background, [[0,0],[layout.height,layout.width]], {opacity:tracing ? 1 : .65}).addTo(layers);
     for (const item of layout.items) {
       const marker = L.marker([layout.height - item.y, item.x], {
-        icon: icon(item), draggable: Boolean(callbacks.move) && !item.locked, keyboard: true,
+        icon: icon(item), draggable: Boolean(callbacks.move) && !item.locked && !drawing, keyboard: true,
         title: item.name, zIndexOffset: item.kind === 'road' ? -10000 : 1000,
       }).addTo(layers);
+      marker.on('dragstart', () => { editing = true; });
       marker.on('click', () => {
         if (callbacks.select) callbacks.select(item);
         else marker.bindPopup(`${escape(item.name)}${item.kind === 'stall' ? ': ' + status(item) : ''}`).openPopup();
       });
       marker.on('dragend', () => {
+        editing = false;
         if (item.locked) return;
         const pos = marker.getLatLng();
         callbacks.move?.(item, Math.max(0,Math.min(layout.width,pos.lng)), Math.max(0,Math.min(layout.height,layout.height-pos.lat)));
+        render();
       });
+      if (selected === item.id && !item.locked && !drawing && callbacks.transform) addHandles(item, marker);
     }
   }
+
+  function addHandles(item, marker) {
+    const source = {...item}, radians = source.angle * Math.PI / 180;
+    const cos = Math.cos(radians), sin = Math.sin(radians);
+    const toPoint = (x,y) => [layout.height-(source.y+x*sin+y*cos),source.x+x*cos-y*sin];
+    const handles = [];
+    function reposition(draft) {
+      for (const h of handles) {
+        const y = h.rotate ? -draft.height/2-24/Math.pow(2,map.getZoom()) : h.sy*draft.height/2;
+        const x = h.rotate ? 0 : h.sx*draft.width/2;
+        const angle = draft.angle*Math.PI/180;
+        h.marker.setLatLng([layout.height-(draft.y+x*Math.sin(angle)+y*Math.cos(angle)),draft.x+x*Math.cos(angle)-y*Math.sin(angle)]);
+      }
+    }
+    for (const [sx,sy,rotate] of [[-1,-1,false],[1,-1,false],[1,1,false],[-1,1,false],[0,-1,true]]) {
+      const point=toPoint(sx*source.width/2,rotate ? -source.height/2-24/Math.pow(2,map.getZoom()) : sy*source.height/2);
+      const handle=L.marker(point,{draggable:true,keyboard:false,zIndexOffset:20000,icon:L.divIcon({className:'parking-edit-handle',html:rotate?'↻':'',iconSize:[16,16],iconAnchor:[8,8]}),title:rotate?'Drag to rotate':'Drag to resize'}).addTo(layers);
+      let draft={...source};
+      handles.push({marker:handle,sx,sy,rotate});
+      handle.on('dragstart',()=>{editing=true;});
+      handle.on('drag',()=>{
+        const pos=handle.getLatLng(), dx=pos.lng-source.x,dy=layout.height-pos.lat-source.y;
+        if(rotate) draft.angle=Math.atan2(dy,dx)*180/Math.PI+90;
+        else {
+          draft.width=Math.max(0.25,Math.min(20000,2*Math.abs(dx*cos+dy*sin)));
+          draft.height=Math.max(0.25,Math.min(20000,2*Math.abs(-dx*sin+dy*cos)));
+        }
+        marker.setIcon(icon(draft));reposition(draft);
+      });
+      handle.on('dragend',()=>{editing=false;callbacks.transform(item,{width:draft.width,height:draft.height,angle:draft.angle});render();});
+    }
+  }
+  let drawStart=null,drawPreview=null;
+  const canvasPoint = latlng => ({x:Math.max(0,Math.min(layout.width,latlng.lng)),y:Math.max(0,Math.min(layout.height,layout.height-latlng.lat))});
+  function drawMove(event) {
+    if(!drawStart)return;
+    const end=canvasPoint(map.mouseEventToLatLng(event));
+    drawPreview.setBounds([[layout.height-drawStart.y,drawStart.x],[layout.height-end.y,end.x]]);
+  }
+  function cancelDraw() {
+    document.removeEventListener('mousemove',drawMove);document.removeEventListener('mouseup',drawEnd);
+    if(drawPreview)map.removeLayer(drawPreview);drawPreview=null;drawStart=null;editing=false;
+  }
+  function drawEnd(event) {
+    if(!drawStart)return;
+    const start=drawStart,end=canvasPoint(map.mouseEventToLatLng(event));cancelDraw();
+    const width=Math.abs(end.x-start.x),height=Math.abs(end.y-start.y);
+    if(width>=0.25&&height>=0.25&&width<=20000&&height<=20000)callbacks.draw?.({x:(start.x+end.x)/2,y:(start.y+end.y)/2,width,height});
+    render();
+  }
+  map.on('mousedown',event=>{
+    if(!drawing || event.originalEvent.button!==0 || event.originalEvent.target.closest('.leaflet-marker-icon,.leaflet-control'))return;
+    drawStart=canvasPoint(event.latlng);editing=true;
+    drawPreview=L.rectangle([event.latlng,event.latlng],{color:'#ffe66b',weight:2,fillOpacity:.08,interactive:false}).addTo(map);
+    document.addEventListener('mousemove',drawMove);document.addEventListener('mouseup',drawEnd);
+    event.originalEvent.preventDefault();
+  });
+
   map.on('zoomend', render);
   function fit() { map.invalidateSize(); map.fitBounds([[0,0],[layout.height,layout.width]], {padding:[30,30]}); }
   fit(); render();
   return {
-    map, fit, setTracing(value) { tracing = Boolean(value); render(); }, destroy: () => map.remove(), status,
+    map, fit, setTracing(value) { tracing = Boolean(value); render(); }, setDrawing(value) { cancelDraw();drawing=Boolean(value)&&Boolean(callbacks.draw);if(drawing)map.dragging.disable();else map.dragging.enable();element.classList.toggle('drawing-spaces',drawing);render(); }, destroy: () => {cancelDraw();map.remove();}, status,
     update(nextLayout, nextStates = states, selectedId = null) { layout = nextLayout; states = nextStates; selected = selectedId; render(); },
   };
 }
@@ -89,6 +152,7 @@ export function createParkingMap(L, element, initialLayout, initialStates = {}, 
 export const parkingMapStyle = `
 .parking-map{height:100%;min-height:420px;background-color:#eae4d5;background-image:linear-gradient(#c9beaa55 1px,transparent 1px),linear-gradient(90deg,#c9beaa55 1px,transparent 1px);background-size:24px 24px}
 .parking-object.stall.tracing{background:transparent;border-color:#ffe66b;color:#fff;text-shadow:0 1px 3px #000}.parking-object.stall.tracing .parking-symbol,.parking-object.stall.tracing small,.parking-object.stall.tracing svg{display:none}
+.parking-edit-handle{background:#fff;border:2px solid #276bd3;border-radius:50%;text-align:center;font-size:12px;color:#276bd3;cursor:grab;box-shadow:0 1px 4px #0005}.drawing-spaces{cursor:crosshair}
 .parking-object-anchor{background:none;border:0}
 .parking-object{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:space-between;gap:3px;padding:5%;color:#59613b;text-align:center;transform-origin:center;overflow:hidden;cursor:pointer;font-family:Courier New,monospace}
 .parking-object.stall{background:#dce1c4;border:2px solid #8e9a63;border-bottom-width:5px;border-radius:7px 7px 1px 1px}

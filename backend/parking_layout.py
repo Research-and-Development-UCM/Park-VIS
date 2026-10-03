@@ -24,10 +24,10 @@ class LayoutItem(BaseModel):
     id: str = Field(min_length=1, max_length=80)
     kind: Literal["stall", "road", "label", "entry"]
     name: str = Field(default="", max_length=80)
-    x: float = Field(ge=0, le=10000)
-    y: float = Field(ge=0, le=10000)
-    width: float = Field(ge=8, le=2000)
-    height: float = Field(ge=8, le=2000)
+    x: float = Field(ge=0, le=100000)
+    y: float = Field(ge=0, le=100000)
+    width: float = Field(ge=0.25, le=20000)
+    height: float = Field(ge=0.25, le=20000)
     angle: float = Field(default=0, ge=-360, le=360)
     locked: bool = Field(default=False, strict=True)
     space_id: int | None = Field(default=None, ge=1)
@@ -37,9 +37,9 @@ class ParkingLayout(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     version: Literal[1] = 1
     name: str = Field(default="My parking lot", min_length=1, max_length=80)
-    width: int = Field(default=1200, ge=200, le=10000)
-    height: int = Field(default=800, ge=200, le=10000)
-    background: str = Field(default="", max_length=4_000_000)
+    width: int = Field(default=1200, ge=200, le=100000)
+    height: int = Field(default=800, ge=200, le=100000)
+    background: str = Field(default="", max_length=21_000_000)
     items: list[LayoutItem] = Field(default_factory=list, max_length=1000)
 
     @model_validator(mode="after")

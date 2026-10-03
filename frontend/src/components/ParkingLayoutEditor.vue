@@ -10,11 +10,11 @@
     <div v-if="!layout" class="editor-loading">{{ lotsLoading || busy ? 'Loading your spaces…' : loadFailed ? 'Layout could not load. Select the lot to try again.' : 'Choose a parking lot above to start arranging its spaces.' }}</div>
     <template v-else>
       <div class="editor-toolbar">
-        <div><button @click="add('stall')">+ Space</button><button @click="add('road')">+ Road</button><button @click="add('label')">+ Label</button><button @click="add('entry')">+ Entrance</button></div>
+        <div><button @click="add('stall')">+ Space</button><button :class="{active:drawing}" @click="toggleDrawing">{{ drawing ? 'Finish drawing' : 'Draw spaces' }}</button><button @click="add('road')">+ Road</button><button @click="add('label')">+ Label</button><button @click="add('entry')">+ Entrance</button></div>
         <div><button :disabled="!selected" @click="copyObject">Copy</button><button :disabled="!copiedObject" @click="pasteObject">Paste</button><button :disabled="!selected" @click="duplicate">Duplicate</button><button :disabled="!undoStack.length" @click="undo">Undo</button><button @click="controller?.fit()">Fit map</button><button @click="toggleExpanded">{{ expanded ? 'Exit expanded view' : 'Expand workspace' }}</button><button v-if="layout.background" @click="toggleTracing">{{ tracing ? 'Standard view' : 'Trace aerial' }}</button><label class="file-button">Background<input type="file" accept="image/png,image/jpeg,image/webp" @change="uploadBackground" /></label></div>
       </div>
       <div class="editor-workspace">
-        <div class="map-panel"><div ref="mapElement" class="parking-map"></div><div class="map-hint">Drag objects to position them · Scroll to zoom · Drag the canvas to pan</div></div>
+        <div class="map-panel"><div ref="mapElement" class="parking-map"></div><div class="map-hint">{{ drawing ? 'Drag across a parking space to draw its box · Escape to finish' : 'Drag slots to move · Select a slot for resize and rotation handles · Scroll to zoom' }}</div></div>
         <aside class="editor-inspector">
           <div class="inspector-tabs"><button :class="{ active: tab === 'object' }" @click="tab = 'object'">Object</button><button :class="{ active: tab === 'layout' }" @click="tab = 'layout'">Layout & export</button></div>
           <template v-if="tab === 'object'">
@@ -23,7 +23,7 @@
               <label>Name<input :value="selected.name" maxlength="80" @change="change('name', $event.target.value)" /></label>
               <label v-if="selected.kind === 'stall'">Live camera space<select :value="selected.space_id ?? ''" @change="change('space_id', $event.target.value ? Number($event.target.value) : null)"><option value="">Unlinked · unknown status</option><option v-for="s in linkOptions" :key="s.id" :value="s.id" :disabled="linkedElsewhere(s.id)">{{ s.camera_name }} / {{ s.name }}{{ linkedElsewhere(s.id) ? ' (already linked)' : '' }}</option></select></label>
               <div class="input-pair"><label>X<input type="number" :disabled="selected.locked" :value="selected.x" min="0" :max="layout.width" @change="changeNumber('x', $event, 0, layout.width)" /></label><label>Y<input type="number" :disabled="selected.locked" :value="selected.y" min="0" :max="layout.height" @change="changeNumber('y', $event, 0, layout.height)" /></label></div>
-              <div class="input-pair"><label>Width<input type="number" :disabled="selected.locked" :value="selected.width" min="8" max="2000" @change="changeNumber('width', $event, 8, 2000)" /></label><label>Height<input type="number" :disabled="selected.locked" :value="selected.height" min="8" max="2000" @change="changeNumber('height', $event, 8, 2000)" /></label></div>
+              <div class="input-pair"><label>Width<input type="number" :disabled="selected.locked" :value="selected.width" min="0.25" step="0.25" max="20000" @change="changeNumber('width', $event, 0.25, 20000)" /></label><label>Height<input type="number" :disabled="selected.locked" :value="selected.height" min="0.25" step="0.25" max="20000" @change="changeNumber('height', $event, 0.25, 20000)" /></label></div>
               <label>Rotation · degrees<input type="number" :disabled="selected.locked" :value="selected.angle" min="-360" max="360" @change="changeNumber('angle', $event, -360, 360)" /></label>
               <div class="inspector-actions"><button @click="duplicate">Duplicate</button><button class="danger" :disabled="selected.locked" @click="remove">Remove</button></div>
               <h3 class="mt-4">Repeat spaces</h3>
@@ -35,7 +35,7 @@
             <div v-else class="selection-empty"><span>↖</span><h2>Select an object</h2><p>Click a space, road, or label to change its size, rotation, and live link.</p></div>
             <hr /><section class="space-generator"><h3>Build parking row</h3><p class="helper">Count includes the first space. Gap is the clear distance between slots. Directions follow the slot rotation.</p>
 <div class="input-pair"><label>Space count<input v-model.number="row.count" type="number" min="1" max="1000" /></label><label>Gap<input v-model.number="row.gap" type="number" min="0" max="1000" /></label></div>
-<div class="input-pair"><label>Slot width<input v-model.number="row.width" type="number" min="8" max="2000" /></label><label>Slot height<input v-model.number="row.height" type="number" min="8" max="2000" /></label></div>
+<div class="input-pair"><label>Slot width<input v-model.number="row.width" type="number" min="0.25" step="0.25" max="20000" /></label><label>Slot height<input v-model.number="row.height" type="number" min="0.25" step="0.25" max="20000" /></label></div>
 <label>Extend direction<select v-model="row.direction"><option value="right">Right (+ horizontal) →</option><option value="left">Left (− horizontal) ←</option><option value="down">Down (+ vertical) ↓</option><option value="up">Up (− vertical) ↑</option></select></label>
 <div class="input-pair"><label>Start X<input v-model.number="row.x" type="number" min="0" :max="layout.width" /></label><label>Start Y<input v-model.number="row.y" type="number" min="0" :max="layout.height" /></label></div>
 <label>Slot rotation · degrees<input v-model.number="row.angle" type="number" min="-360" max="360" /></label><label>Name prefix<input v-model="row.prefix" maxlength="60" /></label><label>Starting number<input v-model.number="row.start" type="number" min="1" max="1000000" /></label>
@@ -44,8 +44,8 @@
           </template>
           <template v-else>
             <h2>Your layout</h2><label>Lot name<input v-model="layout.name" maxlength="80" /></label>
-            <div class="input-pair"><label>Canvas width<input type="number" :value="layout.width" min="200" max="10000" @change="resize('width', $event)" /></label><label>Canvas height<input type="number" :value="layout.height" min="200" max="10000" @change="resize('height', $event)" /></label></div>
-            <button v-if="layout.background" @click="checkpoint(); layout.background = ''">Remove background</button>
+            <div class="input-pair"><label>Canvas width<input type="number" :value="layout.width" min="200" max="100000" @change="resize('width', $event)" /></label><label>Canvas height<input type="number" :value="layout.height" min="200" max="100000" @change="resize('height', $event)" /></label></div>
+            <p class="helper">The aerial stays fixed to the canvas. Upload a high-resolution image, then match the canvas to it to preserve its proportions.</p><button v-if="layout.background" @click="matchImageCanvas">Match canvas to image</button><button v-if="layout.background" @click="checkpoint(); layout.background = ''">Remove background</button>
             <hr /><h3>Move it anywhere</h3><p class="helper">JSON preserves your editable setup. HTML is a self-contained, read-only map with no admin credentials.</p>
             <div class="export-buttons"><button @click="downloadJson">Export layout JSON</button><label class="file-button">Import layout JSON<input type="file" accept=".json,application/json" @change="importJson" /></label><button @click="downloadSnapshot">Export offline HTML</button></div>
             <hr /><h3>Live website viewer</h3><label>Backend / proxy URL<input v-model="backendUrl" placeholder="https://parking.example.com" /></label><p class="helper">For an external website, enter your publicly reachable HTTPS backend URL. Localhost only works on this computer.</p>
@@ -71,7 +71,7 @@ const layout = ref(null), cameras = ref([]), states = ref({}), selectedId = ref(
 const mapElement = ref(null), message = ref(''), isError = ref(false), busy = ref(false), loadFailed = ref(false);
 const baseline = ref(''), undoStack = ref([]), viewKey = ref(''), backendUrl = ref(window.location.origin);
 const copiedObject = ref(null), repeatCount = ref(5), repeatGap = ref(10);
-const expanded = ref(false), tracing = ref(true);
+const expanded = ref(false), tracing = ref(true), drawing = ref(false);
 const row = ref({count:10,gap:4,width:24,height:48,direction:'right',x:100,y:100,angle:0,prefix:'P',start:1});
 const route = useRoute(), groups = ref([]), selectedLot = ref(''), lotsLoading = ref(true);
 const lotOptions = computed(() => [...groups.value.map(g=>({id:`group:${g.id}`,name:`${g.name} · parking lot`})),...cameras.value.map(c=>({id:`camera:${c.id}`,name:`${c.name} · single camera`})),{id:'overview',name:'All cameras · existing combined layout'}]);
@@ -89,6 +89,13 @@ const linkedCount = computed(() => layout.value?.items.filter(i => i.kind === 's
 const linkOptions = computed(() => lotCameras.value.flatMap(c => c.spaces.map(s => ({...s,camera_name:c.name}))));
 const embedCode = computed(() => `<iframe src="${backendUrl.value.replace(/\/$/,'')}/api/parking-layout/embed/${viewKey.value}" title="Parking availability" width="100%" height="650" style="border:0" loading="lazy"></iframe>`);
 async function toggleExpanded() { expanded.value = !expanded.value; await nextTick(); controller?.map.invalidateSize(); }
+function toggleDrawing() { drawing.value = !drawing.value; controller?.setDrawing(drawing.value); }
+function transformItem(item, values) { if(item.locked)return; checkpoint(); Object.assign(item,values); }
+function drawSpace(values) {
+  if(layout.value.items.length >= 1000)return notify('A layout can contain up to 1,000 objects.',true);
+  checkpoint();const item = {id:crypto.randomUUID(),kind:'stall',name:row.value.prefix+row.value.start++, ...values,angle:0,locked:false,space_id:null};
+  layout.value.items.push(item);select(item);
+}
 function toggleTracing() { tracing.value = !tracing.value; controller?.setTracing(tracing.value); }
 function notify(text, error = false) { message.value = text; isError.value = error; }
 function errorText(e) { const detail = e.response?.data?.detail; return typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map(d => d.msg).join('; ') : e.message || 'Operation failed'; }
@@ -98,7 +105,7 @@ function select(item) { selectedId.value = item.id; tab.value = 'object'; }
 function linkedElsewhere(id) { return layout.value.items.some(i => i.id !== selectedId.value && i.space_id === id); }
 function change(key, value) { if (!selected.value || (selected.value.locked && ['x','y','width','height','angle'].includes(key))) return; checkpoint(); selected.value[key] = value; }
 function changeNumber(key, event, min, max) { const value = Number(event.target.value); if (!Number.isFinite(value)) return; change(key, Math.max(min,Math.min(max,value))); }
-function resize(key,event) { const value = Number(event.target.value); if (!Number.isFinite(value)) return; const size = Math.round(Math.max(200,Math.min(10000,value))); if (layout.value.items.some(i=>i.locked && i[key === 'width' ? 'x' : 'y'] > size)) return notify('Unlock items outside the new canvas before shrinking it.',true); checkpoint(); layout.value[key] = size; for (const item of layout.value.items) { item.x = Math.min(item.x,layout.value.width); item.y = Math.min(item.y,layout.value.height); } nextTick(() => controller?.fit()); }
+function resize(key,event) { const value = Number(event.target.value); if (!Number.isFinite(value)) return; const size = Math.round(Math.max(200,Math.min(100000,value))); if (layout.value.items.some(i=>i.locked && i[key === 'width' ? 'x' : 'y'] > size)) return notify('Unlock items outside the new canvas before shrinking it.',true); checkpoint(); layout.value[key] = size; for (const item of layout.value.items) { item.x = Math.min(item.x,layout.value.width); item.y = Math.min(item.y,layout.value.height); } nextTick(() => controller?.fit()); }
 function add(kind) {
   if (layout.value.items.length >= 1000) return notify('A layout can contain up to 1,000 objects.',true);
   checkpoint();
@@ -139,7 +146,7 @@ function useSelectedForRow() {
 function buildRow() {
   const r = row.value;
   if (!Number.isInteger(r.count) || r.count < 1 || r.count > 1000 || !Number.isInteger(r.start) || r.start < 1 || r.start > 1000000 ||
-      !['x','y','width','height','angle','gap'].every(k=>Number.isFinite(r[k])) || r.width < 8 || r.width > 2000 || r.height < 8 || r.height > 2000 || r.gap < 0 || r.gap > 1000 || Math.abs(r.angle) > 360)
+      !['x','y','width','height','angle','gap'].every(k=>Number.isFinite(r[k])) || r.width < 0.25 || r.width > 20000 || r.height < 0.25 || r.height > 20000 || r.gap < 0 || r.gap > 1000 || Math.abs(r.angle) > 360)
     return notify('Enter valid count, dimensions, gap, position, rotation, and starting number.',true);
   if (layout.value.items.length + r.count > 1000) return notify('A layout can contain up to 1,000 objects.',true);
   const horizontal = ['left','right'].includes(r.direction), sign = ['left','up'].includes(r.direction) ? -1 : 1;
@@ -158,6 +165,7 @@ function buildRow() {
 }
 function remove() { if (!selected.value || selected.value.locked) return; checkpoint();layout.value.items = layout.value.items.filter(i=>i.id!==selectedId.value);selectedId.value=null; }
 function keyboard(event) {
+  if (event.key === 'Escape' && drawing.value) { event.preventDefault(); toggleDrawing(); return; }
   if (event.key === 'Escape' && expanded.value) { event.preventDefault(); toggleExpanded(); return; }
   if (!layout.value || busy.value || event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])') || event.isComposing) return;
   const command = event.ctrlKey || event.metaKey, key = event.key.toLowerCase();
@@ -173,7 +181,7 @@ function keyboard(event) {
   if (!direction) return;
   event.preventDefault();const [axis,sign] = direction, step = event.shiftKey ? 10 : 1;
   const property = event.altKey ? axis === 'x' ? 'width' : 'height' : axis;
-  const min = event.altKey ? 8 : 0, max = event.altKey ? 2000 : axis === 'x' ? layout.value.width : layout.value.height;
+  const min = event.altKey ? 0.25 : 0, max = event.altKey ? 20000 : axis === 'x' ? layout.value.width : layout.value.height;
   const value = Math.max(min,Math.min(max,selected.value[property]+sign*step));
   if (value !== selected.value[property]) {if (!event.repeat) checkpoint();selected.value[property]=value;}
 }
@@ -201,21 +209,33 @@ async function exportLive(){
   }catch(e){notify(errorText(e),true);}
 }
 async function revoke(){try{await axios.delete('/api/parking-layout/share',{params:lotParams()});viewKey.value='';notify('Existing live viewer links for this lot have been disabled.');}catch(e){notify(errorText(e),true);}}
+async function matchImageCanvas() {
+  try {
+    const image = await new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=layout.value.background;});
+    const width=Math.max(200,image.naturalWidth),height=Math.max(200,image.naturalHeight);
+    if(width>100000||height>100000)return notify('Image dimensions exceed the canvas limit.',true);
+    if(layout.value.items.some(i=>i.locked))return notify('Unlock items before scaling the layout to the image.',true);
+    const sx=width/layout.value.width,sy=height/layout.value.height;
+    if(layout.value.items.some(i=>i.width*sx>20000||i.height*sy>20000||i.width*sx<0.25||i.height*sy<0.25))return notify('Scaling would put some slot sizes outside the supported range.',true);
+    checkpoint();for(const item of layout.value.items){item.x*=sx;item.y*=sy;item.width*=sx;item.height*=sy;}
+    layout.value.width=width;layout.value.height=height;await nextTick();controller?.fit();notify('Canvas matched to image dimensions. Existing objects scaled with it.');
+  }catch{notify('Unable to read image dimensions.',true);}
+}
 async function uploadBackground(event){
   const file=event.target.files?.[0];event.target.value='';if(!file)return;
-  if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2_900_000)return notify('Choose a PNG, JPEG, or WebP image smaller than 2.9 MB.',true);
+  if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>15_000_000)return notify('Choose a PNG, JPEG, or WebP image smaller than 15 MB.',true);
   try{const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});checkpoint();layout.value.background=data;notify('Background added. Save the layout to keep it.');}catch{notify('Unable to read background.',true);}
 }
 async function importJson(event){
   const file=event.target.files?.[0];event.target.value='';if(!file)return;
   try{
-    if(file.size>4_500_000)throw new Error('Layout file is too large.');
+    if(file.size>22_000_000)throw new Error('Layout file is too large.');
     const value=JSON.parse(await file.text());
-    if(value.version!==1||typeof value.name!=='string'||!value.name.trim()||value.name.length>80||!Number.isInteger(value.width)||!Number.isInteger(value.height)||value.width<200||value.width>10000||value.height<200||value.height>10000||!Array.isArray(value.items)||value.items.length>1000||typeof value.background!=='string')throw new Error('Invalid parking layout file.');
-    if(value.background && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value.background)||value.background.length>4_000_000))throw new Error('Invalid background image.');
+    if(value.version!==1||typeof value.name!=='string'||!value.name.trim()||value.name.length>80||!Number.isInteger(value.width)||!Number.isInteger(value.height)||value.width<200||value.width>100000||value.height<200||value.height>100000||!Array.isArray(value.items)||value.items.length>1000||typeof value.background!=='string')throw new Error('Invalid parking layout file.');
+    if(value.background && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value.background)||value.background.length>21_000_000))throw new Error('Invalid background image.');
     const ids=new Set(),links=new Set();
     for(const item of value.items){
-      if(typeof item.id!=='string'||!item.id||item.id.length>80||ids.has(item.id)||!['stall','road','label','entry'].includes(item.kind)||typeof item.name!=='string'||item.name.length>80||!['x','y','width','height','angle'].every(k=>typeof item[k]==='number'&&Number.isFinite(item[k]))||item.x<0||item.x>value.width||item.y<0||item.y>value.height||item.width<8||item.width>2000||item.height<8||item.height>2000||Math.abs(item.angle)>360)throw new Error('Invalid layout object.');
+      if(typeof item.id!=='string'||!item.id||item.id.length>80||ids.has(item.id)||!['stall','road','label','entry'].includes(item.kind)||typeof item.name!=='string'||item.name.length>80||!['x','y','width','height','angle'].every(k=>typeof item[k]==='number'&&Number.isFinite(item[k]))||item.x<0||item.x>value.width||item.y<0||item.y>value.height||item.width<0.25||item.width>20000||item.height<0.25||item.height>20000||Math.abs(item.angle)>360)throw new Error('Invalid layout object.');
       if(item.locked !== undefined && typeof item.locked !== 'boolean')throw new Error('Invalid lock setting.');
       ids.add(item.id);
       if(item.space_id!==null&&(!Number.isInteger(item.space_id)||item.space_id<1||item.kind!=='stall'||links.has(item.space_id)))throw new Error('Invalid or duplicate camera-space link.');
@@ -236,14 +256,14 @@ async function loadLot(choice) {
   if (!lotOptions.value.some(l=>l.id===choice)) return;
   busy.value=true;selectedLot.value=choice;loadFailed.value=false;
   controller?.destroy();controller=null;observer?.disconnect();observer=null;
-  layout.value=null;selectedId.value=null;undoStack.value=[];copiedObject.value=null;viewKey.value='';message.value='';
+  layout.value=null;selectedId.value=null;drawing.value=false;undoStack.value=[];copiedObject.value=null;viewKey.value='';message.value='';
   try {
     const {data}=await axios.get('/api/parking-layout',{params:lotParams()});if(disposed)return;
     layout.value=data.layout||defaultLayout(lotCameras.value);
     if(!data.layout)layout.value.name=lotOptions.value.find(l=>l.id===choice).name.split(' · ')[0];
     baseline.value=data.layout?JSON.stringify(layout.value):'';
     await nextTick();if(disposed)return;
-    controller=createParkingMap(L,mapElement.value,layout.value,states.value,{select,move(item,x,y){if(item.locked)return;checkpoint();item.x=Math.min(layout.value.width,Math.round(x/10)*10);item.y=Math.min(layout.value.height,Math.round(y/10)*10);}});
+    controller=createParkingMap(L,mapElement.value,layout.value,states.value,{select,transform:transformItem,draw:drawSpace,move(item,x,y){if(item.locked)return;checkpoint();item.x=Math.min(layout.value.width,Math.round(x*100)/100);item.y=Math.min(layout.value.height,Math.round(y*100)/100);}});
     controller.setTracing?.(tracing.value);
     observer=new ResizeObserver(()=>controller?.map.invalidateSize());observer.observe(mapElement.value);
   }catch(e){loadFailed.value=true;notify(errorText(e),true);}finally{busy.value=false;}
