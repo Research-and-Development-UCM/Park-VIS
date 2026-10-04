@@ -30,7 +30,7 @@ except ImportError:
 from .logging_config import vulture_logger as logger
 
 _vv_instance = None
-_vv_config = {"use_gpu": None, "max_res": None, "last_check": 0, "generation": 0}
+_vv_config = {"use_gpu": None, "max_res": None, "backend": None, "last_check": 0, "generation": 0}
 _vv_init_lock = threading.Lock()
 _vv_build_lock = threading.Lock()
 _vv_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="inference_worker")
@@ -61,26 +61,36 @@ def get_vulturevision():
         try:
             device = db.query(models.Setting).filter_by(key="inference_device").first()
             resolution = db.query(models.Setting).filter_by(key="max_inference_resolution").first()
+            backend_setting = db.query(models.Setting).filter_by(key="inference_backend").first()
+            engine_backend = backend_setting.value if backend_setting else "vulturevision"
+            if engine_backend not in ("vulturevision", "marek_rcnn"):
+                raise RuntimeError("Unknown inference backend: " + engine_backend)
             use_gpu = bool(device and device.value == "cuda")
             max_res = int(resolution.value) if resolution else 1440
         finally:
             db.close()
         with _vv_init_lock:
             rebuild = (_vv_instance is None or _vv_config["use_gpu"] != use_gpu
-                       or _vv_config["max_res"] != max_res)
+                       or _vv_config["max_res"] != max_res or _vv_config["backend"] != engine_backend)
         if rebuild:
-            model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "parking-occupancy.encs")
-            if not os.path.isfile(model_path):
-                raise RuntimeError("AI model missing. Run git lfs pull to download models/parking-occupancy.encs.")
-            if os.path.getsize(model_path) < 1024:
-                with open(model_path, "rb") as model_file:
-                    if model_file.read(80).startswith(b"version https://git-lfs.github.com/spec/v1"):
-                        raise RuntimeError("The AI model is a Git LFS pointer. Run git lfs pull first.")
-            logger.info("Loading parking model (GPU: {gpu}, MaxRes: {res})", gpu=use_gpu, res=max_res)
-            new_instance = VultureVision(model_path=model_path, use_gpu=use_gpu, max_resolution=max_res)
+            if engine_backend == "marek_rcnn":
+                from .marek_engine import MarekParkingEngine
+                model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "parking_RCNN_128_square_gopro.pt")
+                logger.info("Loading Marek R-CNN model (GPU requested: {gpu}, MaxRes: {res})", gpu=use_gpu, res=max_res)
+                new_instance = MarekParkingEngine(model_path, use_gpu=use_gpu, max_resolution=max_res)
+            else:
+                model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "parking-occupancy.encs")
+                if not os.path.isfile(model_path):
+                    raise RuntimeError("AI model missing. Run git lfs pull to download models/parking-occupancy.encs.")
+                if os.path.getsize(model_path) < 1024:
+                    with open(model_path, "rb") as model_file:
+                        if model_file.read(80).startswith(b"version https://git-lfs.github.com/spec/v1"):
+                            raise RuntimeError("The AI model is a Git LFS pointer. Run git lfs pull first.")
+                logger.info("Loading parking model (GPU: {gpu}, MaxRes: {res})", gpu=use_gpu, res=max_res)
+                new_instance = VultureVision(model_path=model_path, use_gpu=use_gpu, max_resolution=max_res)
             with _vv_init_lock:
                 _vv_instance = new_instance
-                _vv_config.update(use_gpu=use_gpu, max_res=max_res)
+                _vv_config.update(use_gpu=use_gpu, max_res=max_res, backend=engine_backend)
         with _vv_init_lock:
             if generation == _vv_config["generation"]:
                 _vv_config["last_check"] = time.time()
@@ -121,12 +131,14 @@ async def run_inference(camera_id: int, image_bytes: bytes, spaces: list, max_re
             img, rois_np
         )
         
+        if len(probs) != len(space_ids):
+            raise RuntimeError("Occupancy model returned a different number of scores than camera spaces.")
         elapsed = time.perf_counter() - start_time
         probs_dict = {sid: float(p) for sid, p in zip(space_ids, probs)}
         return probs_dict, elapsed, img.shape[1::-1]
         
     except Exception as e:
-        logger.error("VultureVision inference failed: {e}", e=e)
+        logger.error("Parking occupancy inference failed: {e}", e=e)
         # Re-raise rather than returning all-zero probabilities. The
         # scheduler's outer try/except catches the failure, skips the
         # ``_do_save_results`` call for this iteration, and the cached
@@ -191,6 +203,19 @@ def get_gpu_provider():
     Thin pass-through to ``vulturevision.get_gpu_provider``,
     which executes the C++ probe in a separate subprocess.
     """
+    db = database.SessionLocal()
+    try:
+        backend_setting = db.query(models.Setting).filter_by(key="inference_backend").first()
+        marek_active = bool(backend_setting and backend_setting.value == "marek_rcnn")
+    finally:
+        db.close()
+    if marek_active:
+        try:
+            import torch
+            available = torch.cuda.is_available()
+            return {"provider": "PyTorch CUDA" if available else "", "error": "" if available else "The installed Marek runtime is using CPU. A CUDA-compatible PyTorch runtime and GPU are required for GPU acceleration."}
+        except ImportError:
+            return {"provider": "", "error": "Install requirements-marek.txt to use the Marek model."}
     import sys
     is_test = "pytest" in sys.modules or "unittest" in sys.modules
 

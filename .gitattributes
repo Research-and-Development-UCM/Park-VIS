@@ -1,2 +1,4 @@
 models/parking-occupancy.encs filter=lfs diff=lfs merge=lfs -text
 fixtures/parkinglot.db filter=lfs diff=lfs merge=lfs -text
+
+models/parking_RCNN_128_square_gopro.pt filter=lfs diff=lfs merge=lfs -text

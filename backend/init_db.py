@@ -136,6 +136,7 @@ def main():
             "retention_raw_data_days": "7",
             "retention_hourly_data_days": "365",
             "inference_device": "cpu",
+            "inference_backend": "vulturevision",
             "max_inference_resolution": "1440",
             "hysteresis_occupied_threshold": "0.75",
             "hysteresis_free_threshold": "0.25",

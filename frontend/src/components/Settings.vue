@@ -102,6 +102,9 @@
         <v-divider class="mb-6"></v-divider>
 
         <div class="mb-6">
+          <div class="text-subtitle-1 font-weight-bold mb-1">Occupancy Model</div>
+          <v-select v-model="inferenceBackend" :items="[{title:'Original Park-VIS model',value:'vulturevision'},{title:'Marek R-CNN · 128px GoPro weights',value:'marek_rcnn'}]" item-title="title" item-value="value" variant="outlined" :readonly="!hasPermission('edit_settings')"></v-select>
+          <p class="text-body-2 text-grey-darken-1 mb-4">The Marek model classifies camera-space polygons. Connect those spaces to your parking map to display live occupancy.</p>
           <div class="text-subtitle-1 font-weight-bold mb-1">Inference Device</div>
           <div class="text-body-2 text-grey-darken-1 mb-4">
             Select whether to use the GPU or CPU for model inference.
@@ -550,6 +553,7 @@ const thresholds = computed({
   }
 });
 
+const inferenceBackend = ref('vulturevision');
 const device = ref('auto');
 const maxRes = ref('1024');
 const qualitySnap = ref(85);
@@ -659,6 +663,7 @@ const fetchSettings = async () => {
     interval.value = parseInt(await fetchSetting('inference_interval', '60'));
     occThresh.value = parseFloat(await fetchSetting('hysteresis_occupied_threshold', '0.75'));
     freeThresh.value = parseFloat(await fetchSetting('hysteresis_free_threshold', '0.25'));
+    inferenceBackend.value = await fetchSetting('inference_backend', 'vulturevision');
     const persistedDevice = await fetchSetting('inference_device', 'auto');
     device.value = (cudaAvailable.value || persistedDevice === 'cpu') ? persistedDevice : 'cpu';
     maxRes.value = await fetchSetting('max_inference_resolution', '1024');
@@ -704,33 +709,42 @@ const fetchSettings = async () => {
 const saveSettings = async () => {
   saving.value = true;
   try {
-    await Promise.all([
-      axios.put('/api/settings/inference_interval', { value: interval.value.toString() }),
-      axios.put('/api/settings/hysteresis_occupied_threshold', { value: occThresh.value.toString() }),
-      axios.put('/api/settings/hysteresis_free_threshold', { value: freeThresh.value.toString() }),
-      axios.put('/api/settings/inference_device', { value: device.value }),
-      axios.put('/api/settings/max_inference_resolution', { value: maxRes.value }),
-      axios.put('/api/settings/quality_snapshots', { value: qualitySnap.value.toString() }),
-      axios.put('/api/settings/quality_crops', { value: qualityCrop.value.toString() }),
-      axios.put('/api/settings/max_snapshot_resolution', { value: maxSnapRes.value }),
-      axios.put('/api/settings/retention_images_hours', { value: retention.value.images.toString() }),
-      axios.put('/api/settings/retention_raw_data_days', { value: retention.value.raw.toString() }),
-      axios.put('/api/settings/retention_events_days', { value: retention.value.events.toString() }),
-      axios.put('/api/settings/retention_hourly_data_days', { value: retention.value.hourly.toString() }),
-      axios.put('/api/settings/alerting_enabled', { value: alertingEnabled.value ? 'true' : 'false' }),
-      axios.put('/api/settings/alerting_smtp_host', { value: smtpHost.value }),
-      axios.put('/api/settings/alerting_smtp_port', { value: smtpPort.value.toString() }),
-      axios.put('/api/settings/alerting_smtp_user', { value: smtpUser.value }),
-      axios.put('/api/settings/alerting_smtp_pass', { value: smtpPass.value }),
-      axios.put('/api/settings/alerting_smtp_from', { value: smtpFrom.value }),
-      axios.put('/api/settings/alerting_smtp_use_tls', { value: smtpUseTls.value ? 'true' : 'false' }),
-    ]);
+    const updates = [
+      ['inference_interval', interval.value.toString()],
+      ['hysteresis_occupied_threshold', occThresh.value.toString()],
+      ['hysteresis_free_threshold', freeThresh.value.toString()],
+      ['inference_backend', inferenceBackend.value],
+      ['inference_device', device.value],
+      ['max_inference_resolution', maxRes.value],
+      ['quality_snapshots', qualitySnap.value.toString()],
+      ['quality_crops', qualityCrop.value.toString()],
+      ['max_snapshot_resolution', maxSnapRes.value],
+      ['retention_images_hours', retention.value.images.toString()],
+      ['retention_raw_data_days', retention.value.raw.toString()],
+      ['retention_events_days', retention.value.events.toString()],
+      ['retention_hourly_data_days', retention.value.hourly.toString()],
+      ['alerting_enabled', alertingEnabled.value ? 'true' : 'false'],
+      ['alerting_smtp_host', smtpHost.value],
+      ['alerting_smtp_port', smtpPort.value.toString()],
+      ['alerting_smtp_user', smtpUser.value],
+      ['alerting_smtp_pass', smtpPass.value],
+      ['alerting_smtp_from', smtpFrom.value],
+      ['alerting_smtp_use_tls', smtpUseTls.value ? 'true' : 'false'],
+    ];
+    // Serialize writes so SQLite has only one settings writer at a time.
+    for (const [key, value] of updates) {
+      await axios.put(`/api/settings/${key}`, { value }, { timeout: 15000 });
+    }
     snackbar.value = { show: true, text: 'Settings saved successfully.', color: 'success' };
-    const resStats = await axios.get('/api/settings/storage-stats');
-    stats.value = resStats.data;
+    // A statistics refresh must not keep the save button spinning.
+    axios.get('/api/settings/storage-stats', { timeout: 15000 })
+      .then(response => { stats.value = response.data; })
+      .catch(error => console.error('Error refreshing storage statistics:', error));
   } catch (error) {
     console.error('Error saving settings:', error);
-    snackbar.value = { show: true, text: 'Error saving settings', color: 'error' };
+    snackbar.value = { show: true, text: error.code === 'ECONNABORTED'
+      ? 'Saving timed out. Some settings may have saved; try again.'
+      : 'Error saving settings. Some settings may have saved; try again.', color: 'error' };
   } finally {
     saving.value = false;
   }

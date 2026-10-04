@@ -732,13 +732,16 @@ async def update_setting(key: str, setting_update: schemas.SettingUpdate, db: Se
         if not os.path.exists(cert_setting.value) or not os.path.exists(key_setting.value):
             raise HTTPException(status_code=400, detail="Cannot enable HTTPS: Configured SSL certificate or key file is missing on host.")
 
-    result = crud.update_setting(db, key, setting_update.value)
+    if key == "inference_backend" and setting_update.value not in ("vulturevision", "marek_rcnn"):
+        raise HTTPException(status_code=422, detail="Choose a supported occupancy model.")
+    # SQLite may wait for a concurrent writer. Keep that wait off the event loop.
+    result = await asyncio.to_thread(crud.update_setting, db, key, setting_update.value)
     # Settings that affect the VultureVision constructor (use_gpu,
     # max_resolution) need an engine rebuild on the next call. Without
     # this, the change is only picked up after the 60s poll in
     # inference.get_vulturevision(), which means the operator sees the
     # old engine still running for up to a minute after saving.
-    if key in ("inference_device", "max_inference_resolution"):
+    if key in ("inference_device", "max_inference_resolution", "inference_backend"):
         inference.invalidate_config_cache()
     if key == "inference_interval":
         scheduler.notify_settings_changed()
